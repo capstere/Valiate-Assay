@@ -147,7 +147,11 @@ function Validate-AssayFile {
     $firstLine = (Get-Content -Path $FilePath -TotalCount 1)
     $semiCount  = ($firstLine -split ';').Length - 1
     $commaCount = ($firstLine -split ',').Length - 1
-    $delimiter  = ($semiCount -ge $commaCount) ? ';' : ','
+    if ($semiCount -ge $commaCount) {
+        $delimiter = ';'
+    } else {
+        $delimiter = ','
+    }
     # Import CSV
     $rows = Import-Csv -Path $FilePath -Delimiter $delimiter
     if ($rows.Count -eq 0) { throw "Input file contains no rows." }

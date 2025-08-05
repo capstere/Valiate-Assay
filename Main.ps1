@@ -178,8 +178,14 @@ $validateBtn.Add_Click({
         $results   = $valResult.Results
         $metadata  = $valResult.Metadata
         # Extract used equipment
-        $delimiter   = ((Get-Content -Path $csvFile -TotalCount 1) -split ';').Length -gt ((Get-Content -Path $csvFile -TotalCount 1) -split ',').Length ? ';' : ','
-        $csvRows     = Import-Csv -Path $csvFile -Delimiter $delimiter
+        # Determine the delimiter by inspecting the first line once
+        $firstLine = Get-Content -Path $csvFile -TotalCount 1
+        if (($firstLine -split ';').Length -gt ($firstLine -split ',').Length) {
+            $delimiter = ';'
+        } else {
+            $delimiter = ','
+        }
+        $csvRows = Import-Csv -Path $csvFile -Delimiter $delimiter
         # Build column map for equipment extraction
         $csvColMap   = @{}
         foreach ($p in $csvRows[0].PSObject.Properties.Name) { $csvColMap[$p.ToLower().Trim()] = $p }
@@ -188,10 +194,10 @@ $validateBtn.Add_Click({
         $pipettes    = Get-UsedPipettesFromWorksheet -WorksheetPath $worksheetFile
         $sealData    = Get-SealTestData -PosPath $sealPosFile -NegPath $sealNegFile
         # Control inventory (optional)
-        $control     = Get-ControlInventory -ControlPath $null
+        $control     = Get-ControlInventory -RawDataPath $null
         # Equipment and pipette reference lookups (placeholders)
-        $equipRef    = Get-EquipmentReference -ReferencePath $null
-        $pipRef      = Get-PipetteReference   -ReferencePath $null
+        $equipRef    = Get-EquipmentReference -XlsPath $null
+        $pipRef      = Get-PipetteReference   -XlsPath $null
         # Generate report
         $reportPath  = Join-Path -Path $PSScriptRoot -ChildPath ("ValidationReport_" + (Get-Date).ToString('yyyyMMdd_HHmmss') + '.xlsx')
         Write-ValidationReport -OutputPath $reportPath -Results $results -Metadata $metadata -BatchInfo $batchInfo -EquipmentRef $equipRef -UsedEquipment $usedEquip -SealData $sealData -ControlInventory $control
