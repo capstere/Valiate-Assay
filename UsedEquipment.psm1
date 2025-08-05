@@ -277,7 +277,7 @@ function Get-ControlInventory {
             An array of PSCustomObjects with control inventory details.
     #>
     param(
-        [string]$RawDataPath,
+        [Alias('ControlPath')][string]$RawDataPath,
         [string]$AssayName,
         [hashtable]$SlangMap
     )
@@ -356,7 +356,7 @@ function Get-EquipmentReference {
         .OUTPUTS
             A hashtable of equipment definitions.
     #>
-    param([string]$XlsPath)
+    param([Alias('ReferencePath')][string]$XlsPath)
     $ref = @{}
     if ([string]::IsNullOrEmpty($XlsPath) -or -not (Test-Path -LiteralPath $XlsPath)) {
         return $ref
@@ -385,9 +385,12 @@ function Get-EquipmentReference {
             if ($i -eq 8) { continue } # Skip header row
             $row = $sheet.GetRow($i)
             if (-not $row) { continue }
-            $origName = $row.GetCell(0)?.ToString()
-            $serial   = $row.GetCell(4)?.ToString()
-            $calRaw   = $row.GetCell(8)?.ToString()
+            $cell = $row.GetCell(0)
+            if ($cell) { $origName = $cell.ToString() } else { $origName = $null }
+            $cell = $row.GetCell(4)
+            if ($cell) { $serial = $cell.ToString() } else { $serial = $null }
+            $cell = $row.GetCell(8)
+            if ($cell) { $calRaw = $cell.ToString() } else { $calRaw = $null }
             foreach ($key in $InstrumentMap.Keys) {
                 if ($origName -like "*${($InstrumentMap[$key])}*") {
                     $parsed = $null
@@ -423,7 +426,7 @@ function Get-PipetteReference {
         .OUTPUTS
             A hashtable mapping pipette IDs to calibration information.
     #>
-    param([string]$XlsPath)
+    param([Alias('ReferencePath')][string]$XlsPath)
     $ref = @{}
     if ([string]::IsNullOrEmpty($XlsPath) -or -not (Test-Path -LiteralPath $XlsPath)) {
         return $ref
@@ -435,8 +438,10 @@ function Get-PipetteReference {
         for ($i = 30; $i -le 52; $i++) {
             $row = $sheet.GetRow($i)
             if (-not $row) { continue }
-            $mappedName = $row.GetCell(2)?.ToString()
-            $calRaw     = $row.GetCell(4)?.ToString()
+            $cell = $row.GetCell(2)
+            if ($cell) { $mappedName = $cell.ToString() } else { $mappedName = $null }
+            $cell = $row.GetCell(4)
+            if ($cell) { $calRaw = $cell.ToString() } else { $calRaw = $null }
             $parsed = $null
             $calDate = if ([datetime]::TryParse($calRaw,[ref]$parsed)) {
                 $parsed.ToString('MMM-yy',[System.Globalization.CultureInfo]::InvariantCulture)
