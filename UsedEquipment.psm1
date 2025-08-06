@@ -1,5 +1,5 @@
 <#
-    Module: UsedEquipment
+    Module: UsedEquipment.psm1
 
     This module encapsulates functions for extracting equipment and control
     information from various input sources (CSV, worksheet, seal files).  The
@@ -358,6 +358,7 @@ function Get-EquipmentReference {
         .OUTPUTS
             A hashtable of equipment definitions.
     #>
+
     param([Alias('ReferencePath')][string]$XlsPath)
     $ref = @{}
     if ([string]::IsNullOrEmpty($XlsPath) -or -not (Test-Path -LiteralPath $XlsPath)) {
@@ -387,6 +388,7 @@ function Get-EquipmentReference {
             if ($i -eq 8) { continue } # Skip header row
             $row = $sheet.GetRow($i)
             if (-not $row) { continue }
+
             $cell = $row.GetCell(0)
             if ($cell) { $origName = $cell.ToString() } else { $origName = $null }
             $cell = $row.GetCell(4)
@@ -428,6 +430,7 @@ function Get-PipetteReference {
         .OUTPUTS
             A hashtable mapping pipette IDs to calibration information.
     #>
+
     param([Alias('ReferencePath')][string]$XlsPath)
     $ref = @{}
     if ([string]::IsNullOrEmpty($XlsPath) -or -not (Test-Path -LiteralPath $XlsPath)) {

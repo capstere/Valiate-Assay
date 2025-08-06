@@ -1,4 +1,4 @@
-<#
+<# Main.ps1
     Main entry point for the IVDR validation system.
 
     This script performs the following high‑level tasks:

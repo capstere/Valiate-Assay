@@ -179,8 +179,8 @@
       <Status>Incomplete</Status>
     </AllowedStatus>
     <NumberRange>
-      <Type Name="Negative Control 1" Start="01" End="10" />
-      <Type Name="Positive Control 1" Start="11" End="18" />
+      <Type Name="Negative Control 1" Start="01" End="14" />
+      <Type Name="Positive Control 1" Start="15" End="18" />
       <Type Name="Positive Control 2" Start="19" End="20" />
     </NumberRange>
     <CheckSampleTypeMismatch>true</CheckSampleTypeMismatch>
