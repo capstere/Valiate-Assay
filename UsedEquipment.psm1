@@ -225,14 +225,16 @@ function Get-SealTestData {
                 $textL = $ws.Cells["L$r"].Text
                 if ($valK -ne $null -and $valK -is [double]) {
                     if ($textL -eq 'FAIL' -or $valK -le -2.4) {
+                        if ($isNEG) { $typeVal = 'NEG' } else { $typeVal = 'POS' }
+                        if ($textL -eq 'FAIL') { $statusVal = 'FAIL' } else { $statusVal = 'Minus' }
                         $violations += [PSCustomObject]@{
-                            Type       = ($isNEG ? 'NEG' : 'POS')
+                            Type       = $typeVal
                             Sheet      = $ws.Name
                             Cartridge  = $ws.Cells["H$r"].Text
                             InitialW   = $ws.Cells["I$r"].Value
                             FinalW     = $ws.Cells["J$r"].Value
                             WeightLoss = $valK
-                            Status     = ($textL -eq 'FAIL' ? 'FAIL' : 'Minus')
+                            Status     = $statusVal
                             Obs        = $ws.Cells["M$r"].Text
                         }
                     }
@@ -356,7 +358,6 @@ function Get-EquipmentReference {
         .OUTPUTS
             A hashtable of equipment definitions.
     #>
-
 
     param([Alias('ReferencePath')][string]$XlsPath)
     $ref = @{}

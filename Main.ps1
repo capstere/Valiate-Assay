@@ -67,28 +67,6 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'UsedEquipment.psm1')   
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'SharePoint.psm1')      -Force
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'ReportGenerator.psm1') -Force
 
-# Helper: extract 10‑digit batch number from CSV header by scanning first 3x3 fields
-function Get-BatchNumberFromCsv {
-    param([string]$FilePath)
-    $batch = $null
-    try {
-        $lines = Get-Content -Path $FilePath -TotalCount 3
-        foreach ($line in $lines) {
-            $parts = $line -split '[;,]'
-            foreach ($p in $parts) {
-                if ($p -match '\b(\d{10})\b') {
-                    $batch = $Matches[1]
-                    break
-                }
-            }
-            if ($batch) { break }
-        }
-    } catch {
-        Write-Log "Failed to extract batch number from $FilePath: $_" 'ERROR'
-    }
-    return $batch
-}
-
 # GUI creation
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -102,16 +80,23 @@ $label = New-Object System.Windows.Forms.Label
 $label.Text = "Dra och släpp dina filer här (CSV obligatorisk, Worksheet/Seal valfria)"
 $label.Dock = 'Top'
 $label.AutoSize = $true
-$form.Controls.Add($label)
+
+$batchLabel = New-Object System.Windows.Forms.Label
+$batchLabel.Text = 'Batchnummer (10 siffror)'
+$batchLabel.Dock = 'Top'
+$batchLabel.AutoSize = $true
+
+$batchInput = New-Object System.Windows.Forms.TextBox
+$batchInput.Dock = 'Top'
 
 $listBox = New-Object System.Windows.Forms.ListBox
 $listBox.Dock = 'Fill'
-$form.Controls.Add($listBox)
 
 $validateBtn = New-Object System.Windows.Forms.Button
 $validateBtn.Text = 'Starta validering'
 $validateBtn.Dock = 'Bottom'
-$form.Controls.Add($validateBtn)
+
+$form.Controls.AddRange(@($validateBtn,$listBox,$batchInput,$batchLabel,$label))
 
 $selectedFiles = @()
 
@@ -164,21 +149,27 @@ $validateBtn.Add_Click({
         if ($worksheetFile) { Write-Log "Worksheet: $worksheetFile" }
         if ($sealPosFile)   { Write-Log "Seal POS: $sealPosFile" }
         if ($sealNegFile)   { Write-Log "Seal NEG: $sealNegFile" }
-        # Extract batch number and sharepoint metadata
-        $batchNum  = Get-BatchNumberFromCsv -FilePath $csvFile
-        if ($batchNum) {
-            Write-Log "Detected batch number $batchNum"
-            $batchInfo = Get-SharePointBatchInfo -BatchNumber $batchNum
-        } else {
-            Write-Log "No batch number found in CSV header" 'WARN'
-            $batchInfo = @{}
+        # Batch number input and SharePoint lookup
+        $batchNum = $batchInput.Text.Trim()
+        if ($batchNum -notmatch '^\d{10}$') {
+            [System.Windows.Forms.MessageBox]::Show('Batchnummer måste bestå av exakt 10 siffror','Fel',[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+            return
+        }
+        Write-Log "Batch number: $batchNum"
+        $batchInfo = Get-SharePointBatchInfo -BatchNumber $batchNum
+        if ($batchInfo -and $batchInfo.LSP) {
+            foreach ($f in @($csvFile,$worksheetFile,$sealPosFile,$sealNegFile) | Where-Object { $_ }) {
+                $name = [System.IO.Path]::GetFileName($f)
+                if ($name -notmatch $batchInfo.LSP) {
+                    Write-Log "File $name does not contain LSP $($batchInfo.LSP)" 'WARN'
+                }
+            }
         }
         # Validate CSV
-        $valResult = Validate-AssayFile -FilePath $csvFile -RulesPath $rulesPath
+        $valResult = Test-AssayFile -FilePath $csvFile -RulesPath $rulesPath
         $results   = $valResult.Results
         $metadata  = $valResult.Metadata
         # Extract used equipment
-
         # Determine the delimiter by inspecting the first line once
         $firstLine = Get-Content -Path $csvFile -TotalCount 1
         if (($firstLine -split ';').Length -gt ($firstLine -split ',').Length) {
