@@ -10,4 +10,3 @@ REM environment.  -NoProfile ensures a clean run.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Main.ps1"
 
 endlocal
-

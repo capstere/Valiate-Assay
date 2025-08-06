@@ -1,5 +1,5 @@
 <#
-    Module: ReportGenerator
+    Module: ReportGenerator.psm1
 
     This module is responsible for composing the final Excel report using
     EPPlus.  It accepts validation results, equipment information, seal test

@@ -1,4 +1,4 @@
-<#
+<# AssayValidation.psm1
     This module encapsulates assay validation logic used in the IVDR project.
     It exposes two primary functions:
 
@@ -324,4 +324,3 @@ function Validate-AssayFile {
         Timestamp     = (Get-Date).ToString('s')
     }
     return @{ Results = $results; Metadata = $metadata }
-}

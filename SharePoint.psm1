@@ -1,11 +1,11 @@
 <#
-    Module: SharePoint
+    Module: SharePoint.psm1
 
-    This module encapsulates operations against SharePoint to retrieve batch
-    metadata and other information needed for IVDR validation. The
+    This module encapsulates operations against SharePoint to retrieve batch 
     implementation currently returns mock data; replace the stubbed logic with
     real PnP.PowerShell calls in production.
 #>
+
 
 function Get-SharePointBatchInfo {
     <#
@@ -17,13 +17,13 @@ function Get-SharePointBatchInfo {
             Connect-PnPOnline and Get-PnPListItem calls for production use.
 
         .PARAMETER BatchNumber
-            A 10-digit SAP batch number extracted from the CSV header.
+            A 10-digit SAP batch number extracted from the worksheet xlsx header.
 
         .OUTPUTS
-            Hashtable of batch metadata.
     #>
+
     param([string]$BatchNumber)
-    Write-Verbose "Retrieving batch info for $BatchNumber from SharePoint"
+	Write-Verbose "Retrieving batch info for $BatchNumber from SharePoint"
     return @{
         BatchNumber     = $BatchNumber
         ProductName     = 'MockProduct'

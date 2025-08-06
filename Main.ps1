@@ -1,4 +1,4 @@
-<#
+<# Main.ps1
     Main entry point for the IVDR validation system.
 
     This script performs the following high‑level tasks:
@@ -178,6 +178,7 @@ $validateBtn.Add_Click({
         $results   = $valResult.Results
         $metadata  = $valResult.Metadata
         # Extract used equipment
+
         # Determine the delimiter by inspecting the first line once
         $firstLine = Get-Content -Path $csvFile -TotalCount 1
         if (($firstLine -split ';').Length -gt ($firstLine -split ',').Length) {
