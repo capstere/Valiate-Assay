@@ -4,7 +4,7 @@
 
         Get-SuffixLogic           – Determines whether the suffix parity (X/+)
                                       needs to be swapped based on batch data.
-        Validate-AssayFile        – Validates a single assay CSV file against
+        Test-AssayFile            – Validates a single assay CSV file against
                                       XML rules and returns detailed results.
 
     The code is derived from prior scripts but refactored into a reusable
@@ -68,7 +68,7 @@ function Get-SuffixLogic {
     return ($reversedMatch -gt $standardMatch)
 }
 
-function Validate-AssayFile {
+function Test-AssayFile {
     <#
         .SYNOPSIS
             Validates an assay data file against rules defined in an XML configuration.
@@ -147,7 +147,11 @@ function Validate-AssayFile {
     $firstLine = (Get-Content -Path $FilePath -TotalCount 1)
     $semiCount  = ($firstLine -split ';').Length - 1
     $commaCount = ($firstLine -split ',').Length - 1
-    $delimiter  = ($semiCount -ge $commaCount) ? ';' : ','
+    if ($semiCount -ge $commaCount) {
+        $delimiter = ';'
+    } else {
+        $delimiter = ','
+    }
     # Import CSV
     $rows = Import-Csv -Path $FilePath -Delimiter $delimiter
     if ($rows.Count -eq 0) { throw "Input file contains no rows." }
@@ -276,7 +280,7 @@ function Validate-AssayFile {
                 '^Always=X'   { $expectedSuffix = 'X' }
             }
             if ($rule.SwapSuffix -and $expectedSuffix) {
-                $expectedSuffix = ($expectedSuffix -eq 'X' ? '+' : 'X')
+                if ($expectedSuffix -eq 'X') { $expectedSuffix = '+' } else { $expectedSuffix = 'X' }
             }
             if ($expectedSuffix -and $suffixChar -ne $expectedSuffix) {
                 $res.Validation = 'Error'
@@ -321,3 +325,4 @@ function Validate-AssayFile {
     }
     return @{ Results = $results; Metadata = $metadata }
 }
+Set-Alias -Name Validate-AssayFile -Value Test-AssayFile

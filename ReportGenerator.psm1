@@ -22,7 +22,7 @@ function Write-ValidationReport {
             Destination file path for the Excel report (.xlsx).
 
         .PARAMETER Results
-            Array of result objects returned by Validate-AssayFile.  Each
+            Array of result objects returned by Test-AssayFile.  Each
             object must contain Row, SampleID, Assay, Validation and Message.
 
         .PARAMETER Metadata

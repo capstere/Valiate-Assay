@@ -19,80 +19,72 @@
         .\Install-Dependencies.ps1
         Ensures that the required modules exist in `Modules` and imports them.
 #>
-[CmdletBinding()]
-param()
-
 function Install-PackageIfMissing {
     param(
+        [string]$ModulePath,
         [string]$PackageName,
         [string]$RequiredVersion,
         [string]$Provider = 'NuGet'
     )
-    $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'Modules'
-    if (-not (Test-Path -Path $modulePath)) {
-        New-Item -ItemType Directory -Path $modulePath | Out-Null
+    if (-not (Test-Path -LiteralPath $ModulePath)) {
+        New-Item -ItemType Directory -Path $ModulePath | Out-Null
     }
-    # Determine if the DLL already exists (used for EPPlus/NPOI) or if the module
-    # is installed (used for PnP.PowerShell).  This example uses a simplified
-    # approach; in practice, consider using Find-Module/Find-Package to query
-    # installed versions.
-    $dll = Join-Path -Path $modulePath -ChildPath "$PackageName.dll"
+    $dll    = Join-Path -Path $ModulePath -ChildPath "$PackageName.dll"
     $module = Get-Module -ListAvailable -Name $PackageName -ErrorAction SilentlyContinue | Where-Object { $_.Version -eq $RequiredVersion }
-    if ($module) {
-        Write-Verbose "$PackageName $RequiredVersion is already installed."
-        return
-    }
+    if ($module -or (Test-Path -LiteralPath $dll)) { return }
     try {
         Write-Host "Installing $PackageName $RequiredVersion..." -ForegroundColor Cyan
-        # Use Save-Package to download the package without touching the system wide
-        # module directories.  If Save-Package fails due to policy restrictions,
-        # instruct the user to manually place the DLLs in the Modules folder.
-        Save-Package -Name $PackageName -RequiredVersion $RequiredVersion -ProviderName $Provider -Path $modulePath -Force -ErrorAction Stop | Out-Null
-        Write-Host "$PackageName saved to $modulePath" -ForegroundColor Green
+        Save-Package -Name $PackageName -RequiredVersion $RequiredVersion -ProviderName $Provider -Path $ModulePath -Force -ErrorAction Stop | Out-Null
+        Write-Host "$PackageName saved to $ModulePath" -ForegroundColor Green
     } catch {
-        Write-Warning "Failed to install $PackageName: $_.Exception.Message."
-        Write-Warning "Please download $PackageName version $RequiredVersion manually and place the DLL/module in the 'Modules' folder."
+        Write-Warning "Failed to install $PackageName: $($_.Exception.Message)"
+        Write-Warning "Please download $PackageName version $RequiredVersion manually and place it in '$ModulePath'."
     }
 }
 
-# Install third‑party libraries if they are missing.  Versions are locked to meet
-# validation requirements.
-Install-PackageIfMissing -PackageName 'EPPlus' -RequiredVersion '4.5.3.3'
-Install-PackageIfMissing -PackageName 'NPOI'   -RequiredVersion '2.6.1'
+function Install-Dependencies {
+    param([string]$ModulePath)
 
-# PnP.PowerShell is distributed as a PowerShell module on PSGallery.  Use
-# Save-Module instead of Install-Module to write it into the local Modules folder.
-if (-not (Get-Module -ListAvailable -Name 'PnP.PowerShell')) {
-    try {
-        Write-Host "Installing PnP.PowerShell..." -ForegroundColor Cyan
-        Save-Module -Name 'PnP.PowerShell' -Path (Join-Path -Path $PSScriptRoot -ChildPath 'Modules') -Force -ErrorAction Stop
-        Write-Host "PnP.PowerShell saved." -ForegroundColor Green
-    } catch {
-        Write-Warning "Failed to install PnP.PowerShell: $_.Exception.Message."
-        Write-Warning "Please download the module manually and place it in the 'Modules' folder."
+    $epplusDll = Join-Path -Path $ModulePath -ChildPath 'EPPlus.dll'
+    $npoiDll   = Join-Path -Path $ModulePath -ChildPath 'NPOI.dll'
+    $pnp       = Get-Module -ListAvailable -Name 'PnP.PowerShell' -ErrorAction SilentlyContinue
+
+    if ((Test-Path -LiteralPath $epplusDll) -and (Test-Path -LiteralPath $npoiDll) -and $pnp) {
+        Write-Host 'Dependencies already present.' -ForegroundColor Green
+    } else {
+        Install-PackageIfMissing -ModulePath $ModulePath -PackageName 'EPPlus' -RequiredVersion '4.5.3.3'
+        Install-PackageIfMissing -ModulePath $ModulePath -PackageName 'NPOI'   -RequiredVersion '2.6.1'
+        if (-not $pnp) {
+            try {
+                Write-Host "Installing PnP.PowerShell..." -ForegroundColor Cyan
+                Save-Module -Name 'PnP.PowerShell' -Path $ModulePath -Force -ErrorAction Stop
+                Write-Host "PnP.PowerShell saved." -ForegroundColor Green
+            } catch {
+                Write-Warning "Failed to install PnP.PowerShell: $($_.Exception.Message)"
+                Write-Warning "Please download the module manually and place it in '$ModulePath'."
+            }
+        }
+    }
+
+    if (-not ($env:PSModulePath -like "*$ModulePath*")) {
+        $env:PSModulePath = "$ModulePath;" + $env:PSModulePath
     }
 }
 
-# Update $env:PSModulePath so that modules in Modules folder are discoverable
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'Modules'
-if (-not ($env:PSModulePath -like "*$modulePath*")) {
-    $env:PSModulePath = "$modulePath;" + $env:PSModulePath
+function Load-EPPlus {
+    param([string]$ModulePath)
+    $dll = Join-Path -Path $ModulePath -ChildPath 'EPPlus.dll'
+    if (Test-Path -LiteralPath $dll) {
+        Add-Type -Path $dll -ErrorAction SilentlyContinue
+    }
 }
 
-# Import modules explicitly if they were downloaded as DLLs.  EPPlus and NPOI
-# ship assemblies that can be loaded via Add-Type.  Import PnP.PowerShell as module.
-try {
-    $epPlusDll = Join-Path -Path $modulePath -ChildPath 'EPPlus.dll'
-    if (Test-Path $epPlusDll) {
-        Add-Type -Path $epPlusDll -ErrorAction SilentlyContinue
+function Load-NPOI {
+    param([string]$ModulePath)
+    $dll = Join-Path -Path $ModulePath -ChildPath 'NPOI.dll'
+    if (Test-Path -LiteralPath $dll) {
+        Add-Type -Path $dll -ErrorAction SilentlyContinue
     }
-    $npoiDll = Join-Path -Path $modulePath -ChildPath 'NPOI.dll'
-    if (Test-Path $npoiDll) {
-        Add-Type -Path $npoiDll -ErrorAction SilentlyContinue
-    }
-    Import-Module 'PnP.PowerShell' -ErrorAction SilentlyContinue
-} catch {
-    Write-Warning "Failed to load one or more modules: $_.Exception.Message"
 }
 
-Write-Verbose "Dependency installation complete."
+Write-Verbose "Dependency installation module loaded."
