@@ -503,6 +503,434 @@ function Gui-Log {
     if ($global:LogPath) { Add-Content -Path $global:LogPath -Value $line }
 }
 
+# === SharePoint (asynkron PnP-hämtning & injektion) ===
+$__oldEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Stop'
+$env:PNPPOWERSHELL_UPDATECHECK = 'Off'
+
+function _PnPMon_SafeText { param($obj) try { if ($null -eq $obj) { return '' } ('' + $obj).Trim() } catch { '' } }
+function _PnPMon_GetCheckedFilePath { param($clb) try { if (-not $clb) { return $null }
+    for($i=0;$i -lt $clb.Items.Count;$i++){ if ($clb.GetItemChecked($i)) { return ([IO.FileInfo]$clb.Items[$i]).FullName } } $null
+} catch { $null } }
+function _PnPMon_TryGetCtl { param([string]$Name) try { (Get-Variable -Name $Name -Scope Script -ErrorAction Stop).Value } catch { try { (Get-Variable -Name $Name -Scope Global -ErrorAction Stop).Value } catch { $null } } }
+
+function _PnPMon_EnsureEPPlus {
+    if (Get-Command Load-EPPlus -ErrorAction SilentlyContinue) {
+        return (Load-EPPlus)
+    }
+    try {
+        if ([AppDomain]::CurrentDomain.GetAssemblies().GetName().Name -contains 'EPPlus') { return $true }
+        $cands = @(
+            Join-Path $PSScriptRoot 'EPPlus.dll',
+            Join-Path (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules\EPPlus') 'lib\net45\EPPlus.dll',
+            Join-Path (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\EPPlus') 'lib\net45\EPPlus.dll'
+        ) | Where-Object { $_ -and (Test-Path $_) }
+        $dll = $cands | Select-Object -First 1
+        if (-not $dll) { return $false }
+        [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes($dll)); return $true
+    } catch { return $false }
+}
+
+function _PnPMon_GetBatchFromSealFile {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
+    if (-not (_PnPMon_EnsureEPPlus)) { return $null }
+    try {
+        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
+        $ws  = $pkg.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
+        $bn  = $null
+        if ($ws) { $bn = ($ws.Cells['D2'].Text + '').Trim() }
+        $pkg.Dispose()
+        return $bn
+    } catch { return $null }
+}
+
+function _PnPMon_GetBatchFromOutputReport {
+    param([string]$ReportPath)
+    if (-not $ReportPath -or -not (Test-Path -LiteralPath $ReportPath)) { return $null }
+    if (-not (_PnPMon_EnsureEPPlus)) { return $null }
+    try {
+        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($ReportPath))
+        $ws  = $pkg.Workbook.Worksheets['Seal Test Output']
+        $b = $null
+        if ($ws -and $ws.Dimension) { $b = ($ws.Cells['D2'].Text + '').Trim() }
+        if (-not $b) { $b = ($ws.Cells['B5'].Text + '').Trim() }
+        if (-not $b) { $b = ($ws.Cells['C5'].Text + '').Trim() }
+        $pkg.Dispose()
+        return ($b ? $b : $null)
+    } catch { return $null }
+}
+
+Add-Type -AssemblyName System.Management.Automation | Out-Null
+
+$__spCfg = @{
+    SiteUrl   = if ($SharePointSiteUrl) { $SharePointSiteUrl } else { 'https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management' }
+    ListName  = if ($SP_ListName)       { $SP_ListName }       else { 'Cepheid | Production orders' }
+    Fields    = if ($SP_FieldsRaw)      { $SP_FieldsRaw } else {
+        @('Work_x0020_Center','Title','Batch_x0023_','SAP_x0020_Batch_x0023__x0020_2','LSP','Material','BBD_x002f_SLED',
+          'Actual_x0020_startdate_x002f__x0','PAL_x0020__x002d__x0020_Sample_x','Sample_x0020_Reagent_x0020_P_x00',
+          'Order_x0020_quantity','Total_x0020_good','ITP_x0020_Test_x0020_results','IPT_x0020__x002d__x0020_Testing_0',
+          'MES_x0020__x002d__x0020_Order_x0')
+    }
+    RenameMap = if ($SP_RenameMap) { $SP_RenameMap } else { @{
+        'Work_x0020_Center'='Work Center'; 'Title'='Order#'; 'Batch_x0023_'='SAP Batch#'; 'SAP_x0020_Batch_x0023__x0020_2'='SAP Batch# 2'
+        'LSP'='LSP'; 'Material'='Material'; 'BBD_x002f_SLED'='BBD/SLED'; 'Actual_x0020_startdate_x002f__x0'='ROBAL - Actual start date/time'
+        'PAL_x0020__x002d__x0020_Sample_x'='Sample Reagent use'; 'Sample_x0020_Reagent_x0020_P_x00'='Sample Reagent P/N'
+        'Order_x0020_quantity'='Order quantity'; 'Total_x0020_good'='ROBAL - Till Packning'; 'ITP_x0020_Test_x0020_results'='ITP Test results'
+        'IPT_x0020__x002d__x0020_Testing_0'='IPT - Testing Finalized'; 'MES_x0020__x002d__x0020_Order_x0'='MES Order'
+    } }
+    Desired   = if ($SP_DesiredOrder) { $SP_DesiredOrder } else { @('Work Center','Order#','SAP Batch#','SAP Batch# 2','LSP','Material','BBD/SLED','ROBAL - Actual start date/time','Sample Reagent use','Sample Reagent P/N','Order quantity','ROBAL - Till Packning','ITP Test results','IPT - Testing Finalized','MES Order') }
+    DateFields= if ($SP_DateFields) { $SP_DateFields } else { @('BBD/SLED','ROBAL - Actual start date/time','IPT - Testing Finalized') }
+
+    ClientId  = if ($PnP_ClientId) { $PnP_ClientId } else { '' }
+    Tenant    = if ($PnP_Tenant)   { $PnP_Tenant }   else { 'danaher.onmicrosoft.com' }
+    CertB64   = if ($PnP_CertificateBase64)   { $PnP_CertificateBase64 }   else { '' }
+    CertPwd   = if ($PnP_CertificatePassword) { $PnP_CertificatePassword } else { '' }
+
+    BatchLinkTemplate = if ($SharePointBatchLinkTemplate) { $SharePointBatchLinkTemplate } else { 'https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?view=7&q={BatchNumber}' }
+}
+
+$script:PnPMon_RsPool     = $null
+$script:PnPMon_Tasks      = New-Object System.Collections.ArrayList
+$script:PnPMon_Timer      = $null
+$script:PnPMon_WarmDone   = $false
+$script:PnPMon_Cache      = @{}
+$script:PnPMon_PendingOut = $null
+
+$__outBox   = _PnPMon_TryGetCtl 'outputBox'
+$__form     = _PnPMon_TryGetCtl 'form'
+$__chkSP    = _PnPMon_TryGetCtl 'chkSharepoint'
+$__txtNeg   = _PnPMon_TryGetCtl 'txtNeg'
+$__txtPos   = _PnPMon_TryGetCtl 'txtPos'
+$__clbNeg   = _PnPMon_TryGetCtl 'clbNeg'
+$__clbPos   = _PnPMon_TryGetCtl 'clbPos'
+$__flSave   = _PnPMon_TryGetCtl 'flSave'
+$__rbSaveIn = _PnPMon_TryGetCtl 'rbSaveInLsp'
+
+function PnPMon-Log { param([string]$msg)
+    $ts = (Get-Date).ToString('HH:mm:ss')
+    $line = "[$ts] 🔷 $msg"
+    try {
+        if ($__outBox -and -not $__outBox.IsDisposed) {
+            if ($__outBox.InvokeRequired) {
+                $null = $__outBox.BeginInvoke([Action[string]]{ param($l) $this.AppendText("$l`r`n") }, $line)
+            } else { $__outBox.AppendText("$line`r`n") }
+        } else { Write-Host $line }
+    } catch { Write-Host $line }
+}
+
+function PnPMon-StartPool {
+    if ($script:PnPMon_RsPool) { return }
+    $pool = [RunspaceFactory]::CreateRunspacePool(1,2); $pool.ApartmentState = 'MTA'; $pool.Open()
+    $script:PnPMon_RsPool = $pool
+}
+function PnPMon-StartTimer {
+    if ($script:PnPMon_Timer) { return }
+    $t = New-Object System.Windows.Forms.Timer; $t.Interval = 300
+    $handler = {
+        if (-not $script:PnPMon_Tasks -or $script:PnPMon_Tasks.Count -eq 0) { return }
+        $done = @()
+        foreach ($task in @($script:PnPMon_Tasks)) {
+            if ($task.Handle.IsCompleted) {
+                try {
+                    $res = $task.PS.EndInvoke($task.Handle)
+                    $task.PS.Dispose()
+                    $pl = if ($res -and $res.Count -gt 0) { $res[0] } else { $null }
+                    if ($pl -and $pl.Type -eq 'PnP') {
+                        if ($task.Kind -eq 'Warmup') {
+                            if ($pl.Error) { PnPMon-Log "PnP warmup fel: $($pl.Error)" } else { $script:PnPMon_WarmDone = $true; PnPMon-Log "PnP warmup klar." }
+                        } elseif ($task.Kind -eq 'Fetch') {
+                            if ($pl.Error) { PnPMon-Log "PnP fetch fel ($($task.Meta.Batch)): $($pl.Error)" }
+                            else {
+                                $b = $pl.Result.Batch; $rows = $pl.Result.Rows
+                                if ($rows -and $rows.Count -gt 0) {
+                                    $script:PnPMon_Cache[$b] = $rows
+                                    PnPMon-Log "Cachade $($rows.Count) rad(er) för $b."
+                                    if ($script:PnPMon_PendingOut -and (Test-Path -LiteralPath $script:PnPMon_PendingOut)) {
+                                        try {
+                                            if (_PnPMon_EnsureEPPlus) {
+                                                $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($script:PnPMon_PendingOut))
+                                                if (Get-Command Add-SharePointSheet -ErrorAction SilentlyContinue) {
+                                                    [void](Add-SharePointSheet $pkg $b $rows)
+                                                } else {
+                                                    $name = "SharePoint $b"; if ($name.Length -gt 31) { $name = "SharePoint " + $b.Substring(0,[Math]::Min(20,$b.Length)) }
+                                                    $ws = $pkg.Workbook.Worksheets[$name]; if ($ws) { $pkg.Workbook.Worksheets.Delete($ws) }
+                                                    $ws = $pkg.Workbook.Worksheets.Add($name)
+                                                    $cols = @(); $desired = $__spCfg.Desired
+                                                    if ($desired) { $cols += $desired }
+                                                    foreach ($k in $rows[0].psobject.Properties.Name) { if (-not ($cols -contains $k)) { $cols += $k } }
+                                                    for ($c=0; $c -lt $cols.Count; $c++){ $ws.Cells[1,$c+1].Value = $cols[$c]; $ws.Cells[1,$c+1].Style.Font.Bold=$true }
+                                                    $r=2; foreach ($row in $rows){ for($c=0;$c -lt $cols.Count;$c++){ $ws.Cells[$r,$c+1].Value = $row.$($cols[$c]) } $r++ }
+                                                    try { $ws.Cells[$ws.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                                                }
+                                                $pkg.Save(); $pkg.Dispose()
+                                                PnPMon-Log "SharePoint-flik injicerad i: $script:PnPMon_PendingOut"
+                                            }
+                                        } catch { PnPMon-Log "Post-save injektionsfel: $($_.Exception.Message)" }
+                                    }
+                                } else {
+                                    PnPMon-Log "Inga SharePoint-rader för batch $b."
+                                }
+                            }
+                        }
+                    }
+                } catch { PnPMon-Log "Bg-fel: $($_.Exception.Message)" } finally { $done += $task }
+            }
+        }
+        foreach ($d in $done) { [void]$script:PnPMon_Tasks.Remove($d) }
+    }
+    $t.add_Tick($handler); $t.Start(); $script:PnPMon_Timer = $t
+}
+
+function PnPMon-StartJob {
+    param([hashtable]$Payload)
+    PnPMon-StartPool
+    $ps = [PowerShell]::Create(); $ps.RunspacePool = $script:PnPMon_RsPool
+    $sb = {
+        param($cfg)
+        $out = @{ Type='PnP'; Error=$null; Result=$null }
+        try {
+            Import-Module PnP.PowerShell -ErrorAction Stop
+
+            if ($cfg.Op -eq 'Warmup') {
+                if ($cfg.ClientId -and $cfg.CertB64) {
+                    $pfx = Join-Path $env:TEMP ("pnp_{0}.pfx" -f ([guid]::NewGuid()))
+                    [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($cfg.CertB64))
+                    if ($cfg.CertPwd) {
+                        $sec = ConvertTo-SecureString -String $cfg.CertPwd -AsPlainText -Force
+                        Connect-PnPOnline -Url $cfg.Site -ClientId $cfg.ClientId -Tenant $cfg.Tenant -CertificatePath $pfx -CertificatePassword $sec -ErrorAction Stop
+                    } else {
+                        Connect-PnPOnline -Url $cfg.Site -ClientId $cfg.ClientId -Tenant $cfg.Tenant -CertificatePath $pfx -ErrorAction Stop
+                    }
+                    Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+                } else {
+                    $null = Get-Command Get-PnPListItem -ErrorAction Stop
+                }
+                $out.Result = @{ Warmed = $true }
+            }
+
+            if ($cfg.Op -eq 'Fetch') {
+                if ($cfg.ClientId -and $cfg.CertB64) {
+                    $ctx = Get-PnPContext -ErrorAction SilentlyContinue
+                    if (-not $ctx) {
+                        $pfx = Join-Path $env:TEMP ("pnp_{0}.pfx" -f ([guid]::NewGuid()))
+                        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($cfg.CertB64))
+                        if ($cfg.CertPwd) {
+                            $sec = ConvertTo-SecureString -String $cfg.CertPwd -AsPlainText -Force
+                            Connect-PnPOnline -Url $cfg.Site -ClientId $cfg.ClientId -Tenant $cfg.Tenant -CertificatePath $pfx -CertificatePassword $sec -ErrorAction Stop
+                        } else {
+                            Connect-PnPOnline -Url $cfg.Site -ClientId $cfg.ClientId -Tenant $cfg.Tenant -CertificatePath $pfx -ErrorAction Stop
+                        }
+                        Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                $items = Get-PnPListItem -List $cfg.List -PageSize 500 -Fields $cfg.Fields -ErrorAction Stop
+                $items = $items | Where-Object { $_['Batch_x0023_'] -eq $cfg.Batch -or $_['SAP_x0020_Batch_x0023__x0020_2'] -eq $cfg.Batch }
+                $rows = @()
+                foreach ($it in $items) {
+                    $h = [ordered]@{}
+                    foreach ($f in $cfg.Fields) {
+                        $disp = if ($cfg.Rename.ContainsKey($f)) { $cfg.Rename[$f] } else { $f }
+                        $val  = $it[$f]
+                        if ($cfg.DateFields -contains $disp) {
+                            try {
+                                if ($val -is [datetime]) { $val = $val.ToString('yyyy-MM-dd HH:mm') }
+                                elseif ($val) { $val = ([datetime]::Parse($val)).ToString('yyyy-MM-dd HH:mm') }
+                            } catch {}
+                        }
+                        $h[$disp] = $val
+                    }
+                    $ord = [ordered]@{}
+                    foreach ($k in $cfg.Desired) { $ord[$k] = if ($h.Contains($k)) { $h[$k] } else { $null } }
+                    foreach ($k in $h.Keys) { if (-not $ord.Contains($k)) { $ord[$k] = $h[$k] } }
+                    $rows += [pscustomobject]$ord
+                }
+                $out.Result = @{ Batch = $cfg.Batch; Rows = $rows }
+            }
+        } catch { $out.Error = $_.Exception.Message }
+        return $out
+    }
+    $null = $ps.AddScript($sb).AddArgument($Payload)
+    $handle = $ps.BeginInvoke()
+    $obj = [pscustomobject]@{ PS=$ps; Handle=$handle; Submitted=(Get-Date); Kind=$Payload.Op; Meta=$Payload }
+    [void]$script:PnPMon_Tasks.Add($obj)
+    return $obj
+}
+
+function PnPMon-Warmup {
+    if ($script:PnPMon_WarmDone) { return }
+    PnPMon-Log "Ansluter till SharePoint i bakgrunden…"
+    [void](PnPMon-StartJob -Payload @{
+        Type='PnP'; Op='Warmup'; Site=$__spCfg.SiteUrl
+        ClientId=$__spCfg.ClientId; Tenant=$__spCfg.Tenant; CertB64=$__spCfg.CertB64; CertPwd=$__spCfg.CertPwd
+    })
+}
+
+function PnPMon-QueueFetch { param([string]$Batch)
+    if (-not $Batch) { return }
+    if ($script:PnPMon_Cache.ContainsKey($Batch)) { return }
+    if (-not $__spCfg.ClientId -or -not $__spCfg.CertB64) {
+        PnPMon-Log "Saknar app-nycklar (ClientId/Cert). Hoppar över bakgrundsförfrågan."
+        return
+    }
+    [void](PnPMon-StartJob -Payload @{
+        Type='PnP'; Op='Fetch'; Batch=$Batch
+        Site=$__spCfg.SiteUrl; List=$__spCfg.ListName; Fields=$__spCfg.Fields
+        Rename=$__spCfg.RenameMap; Desired=$__spCfg.Desired; DateFields=$__spCfg.DateFields
+        ClientId=$__spCfg.ClientId; Tenant=$__spCfg.Tenant; CertB64=$__spCfg.CertB64; CertPwd=$__spCfg.CertPwd
+    })
+    PnPMon-Log "SharePoint-hämtning i kö ($Batch)…"
+}
+
+function PnPMon-GetCachedRows { param([string]$Batch) if ($Batch -and $script:PnPMon_Cache.ContainsKey($Batch)) { $script:PnPMon_Cache[$Batch] } else { $null } }
+function PnPMon-SetPendingReport { param([string]$Path) $script:PnPMon_PendingOut = $Path }
+
+PnPMon-StartPool
+PnPMon-StartTimer
+
+if (-not $__chkSP) {
+    try {
+        $chkSharepoint = New-Object System.Windows.Forms.CheckBox
+        $chkSharepoint.Text = "Hämta SharePoint-info"
+        $chkSharepoint.AutoSize = $true
+        $chkSharepoint.Checked = $true
+        $__chkSP = $chkSharepoint
+        if ($__flSave) { [void]$__flSave.Controls.Add($__chkSP) }
+    } catch {}
+}
+
+if ($__form) {
+    $__form.add_Shown({
+        PnPMon-StartTimer
+        PnPMon-Warmup
+    })
+}
+
+$hookBatch = {
+    try {
+        if (-not $__chkSP -or -not $__chkSP.Checked) { return }
+        $pathNeg = if ($__txtNeg) { _PnPMon_SafeText $__txtNeg.Text } else { $null }
+        $pathPos = if ($__txtPos) { _PnPMon_SafeText $__txtPos.Text } else { $null }
+        if (-not $pathNeg -and $__clbNeg) { $pathNeg = _PnPMon_GetCheckedFilePath $__clbNeg }
+        if (-not $pathPos -and $__clbPos) { $pathPos = _PnPMon_GetCheckedFilePath $__clbPos }
+        $bnNeg = if ($pathNeg) { _PnPMon_GetBatchFromSealFile $pathNeg } else { $null }
+        $bnPos = if ($pathPos) { _PnPMon_GetBatchFromSealFile $pathPos } else { $null }
+        if ($bnNeg -and $bnPos -and ($bnNeg -ne $bnPos)) { return }
+        $batch = if ($bnPos) { $bnPos } elseif ($bnNeg) { $bnNeg } else { $null }
+        if ($batch) { PnPMon-QueueFetch -Batch $batch }
+    } catch {}
+}
+
+try { if ($__txtNeg) { $__txtNeg.add_TextChanged($hookBatch) } } catch {}
+try { if ($__txtPos) { $__txtPos.add_TextChanged($hookBatch) } } catch {}
+try { if ($__clbNeg) { $__clbNeg.add_ItemCheck({ Start-Sleep -Milliseconds 25; & $hookBatch }) } } catch {}
+try { if ($__clbPos) { $__clbPos.add_ItemCheck({ Start-Sleep -Milliseconds 25; & $hookBatch }) } } catch {}
+
+function _PnPMon_NewWatcher {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $w = New-Object IO.FileSystemWatcher $Path, 'DocMerge_output_*.xlsx'
+        $w.IncludeSubdirectories = $false; $w.EnableRaisingEvents = $true
+        $handler = Register-ObjectEvent -InputObject $w -EventName Changed -Action {
+            try {
+                $full = $Event.SourceEventArgs.FullPath
+                if (Test-Path -LiteralPath $full) {
+                    $b = _PnPMon_GetBatchFromOutputReport -ReportPath $full
+                    if ($b) {
+                        $rows = PnPMon-GetCachedRows -Batch $b
+                        if ($rows -and $rows.Count -gt 0) {
+                            if (_PnPMon_EnsureEPPlus) {
+                                $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($full))
+                                if (Get-Command Add-SharePointSheet -ErrorAction SilentlyContinue) {
+                                    [void](Add-SharePointSheet $pkg $b $rows)
+                                } else {
+                                    $name = "SharePoint $b"; if ($name.Length -gt 31) { $name = "SharePoint " + $b.Substring(0,[Math]::Min(20,$b.Length)) }
+                                    $ws = $pkg.Workbook.Worksheets[$name]; if ($ws) { $pkg.Workbook.Worksheets.Delete($ws) }
+                                    $ws = $pkg.Workbook.Worksheets.Add($name)
+                                    $cols = @(); $desired = $__spCfg.Desired
+                                    if ($desired) { $cols += $desired }
+                                    foreach ($k in $rows[0].psobject.Properties.Name) { if (-not ($cols -contains $k)) { $cols += $k } }
+                                    for ($c=0; $c -lt $cols.Count; $c++){ $ws.Cells[1,$c+1].Value = $cols[$c]; $ws.Cells[1,$c+1].Style.Font.Bold=$true }
+                                    $r=2; foreach ($row in $rows){ for($c=0;$c -lt $cols.Count;$c++){ $ws.Cells[$r,$c+1].Value = $row.$($cols[$c]) } $r++ }
+                                    try { $ws.Cells[$ws.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                                }
+                                $pkg.Save(); $pkg.Dispose()
+                                PnPMon-Log "SharePoint-flik injicerad i: $full"
+                            }
+                        }
+                    }
+                }
+            } catch {}
+        }
+        return @{ Watcher=$w; Reg=$handler }
+    } catch { return $null }
+}
+
+$script:PnPMon_Watchers = @()
+$script:PnPMon_Watchers += _PnPMon_NewWatcher -Path $env:TEMP
+try {
+    if ($__clbNeg) {
+        $__clbNeg.add_ItemCheck({
+            Start-Sleep -Milliseconds 50
+            try {
+                $path = _PnPMon_GetCheckedFilePath $__clbNeg
+                if ($path) {
+                    $dir = Split-Path -Parent $path
+                    $script:PnPMon_Watchers += _PnPMon_NewWatcher -Path $dir
+                }
+            } catch {}
+        })
+    }
+} catch {}
+
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
+    try {
+        foreach($w in $script:PnPMon_Watchers){ try { if ($w.Reg) { Unregister-Event -SubscriptionId $w.Reg.Id -ErrorAction SilentlyContinue } } catch {} }
+        foreach($w in $script:PnPMon_Watchers){ try { if ($w.Watcher) { $w.Watcher.EnableRaisingEvents = $false; $w.Watcher.Dispose() } } catch {} }
+    } catch {}
+} | Out-Null
+
+function PnPMon-SetPendingReportPath { param([string]$Path) PnPMon-SetPendingReport -Path $Path }
+function PnPMon-InjectInlineIfReady {
+    param([OfficeOpenXml.ExcelPackage]$Pkg,[string]$Batch)
+    try {
+        if (-not $Pkg -or [string]::IsNullOrWhiteSpace($Batch)) { return $false }
+        $rows = PnPMon-GetCachedRows -Batch $Batch
+        if ($rows -and $rows.Count -gt 0) {
+            if (Get-Command Add-SharePointSheet -ErrorAction SilentlyContinue) {
+                return (Add-SharePointSheet $Pkg $Batch $rows)
+            } else {
+                $name = "SharePoint $Batch"; if ($name.Length -gt 31) { $name = "SharePoint " + $Batch.Substring(0,[Math]::Min(20,$Batch.Length)) }
+                $ws = $Pkg.Workbook.Worksheets[$name]; if ($ws) { $Pkg.Workbook.Worksheets.Delete($ws) }
+                $ws = $Pkg.Workbook.Worksheets.Add($name)
+                $cols = @(); $desired = $__spCfg.Desired; if ($desired) { $cols += $desired }
+                foreach ($k in $rows[0].psobject.Properties.Name) { if (-not ($cols -contains $k)) { $cols += $k } }
+                for ($c=0; $c -lt $cols.Count; $c++){ $ws.Cells[1,$c+1].Value = $cols[$c]; $ws.Cells[1,$c+1].Style.Font.Bold=$true }
+                $r=2; foreach ($row in $rows){ for($c=0;$c -lt $cols.Count;$c++){ $ws.Cells[$r,$c+1].Value = $row.$($cols[$c]) } $r++ }
+                try { $ws.Cells[$ws.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                return $true
+            }
+        }
+    } catch {}
+    return $false
+}
+
+$script:PnPMon_PathPoller = New-Object System.Windows.Forms.Timer
+$script:PnPMon_PathPoller.Interval = 1200
+$script:PnPMon_PathPoller.add_Tick({
+    try {
+        $p = $global:LastReportPath
+        if ($p -and (Test-Path -LiteralPath $p)) { PnPMon-SetPendingReport -Path $p }
+    } catch {}
+})
+$script:PnPMon_PathPoller.Start()
+
+PnPMon-Log "PnP Async block laddat."
+PnPMon-Warmup
+
+$ErrorActionPreference = $__oldEAP
+
 # === EPPlus ===
 function Ensure-EPPlus {
     param(
@@ -1259,6 +1687,19 @@ $btnBuild.Add_Click({
     $lsp = $txtLSP.Text.Trim()
     if (-not $lsp) { Gui-Log "⚠️ Ange ett LSP-nummer" 'Warn'; return }
 
+    $sharePointBatch = $null
+    $sharePointEnabled = ($__chkSP ? $__chkSP.Checked : $true)
+    if ($sharePointEnabled) {
+        $batchNeg = Get-BatchNumberFromSealFile $selNeg
+        $batchPos = Get-BatchNumberFromSealFile $selPos
+        if ($batchNeg -and $batchPos -and ($batchNeg -ne $batchPos)) {
+            Gui-Log "⚠️ Batch mismatch mellan NEG och POS – SharePoint-data hämtas inte." 'Warn'
+        } else {
+            $sharePointBatch = if ($batchPos) { $batchPos } elseif ($batchNeg) { $batchNeg } else { $null }
+            if ($sharePointBatch) { PnPMon-QueueFetch -Batch $sharePointBatch }
+        }
+    }
+
     Gui-Log "📄 Neg-fil: $(Split-Path $selNeg -Leaf)" 'Info'
     Gui-Log "📄 Pos-fil: $(Split-Path $selPos -Leaf)" 'Info'
     if ($selCsv) { Gui-Log "📄 CSV: $(Split-Path $selCsv -Leaf)" 'Info' } else { Gui-Log "ℹ️ Ingen CSV vald." 'Info' }
@@ -1273,6 +1714,12 @@ $btnBuild.Add_Click({
     if (-not (Test-Path $templatePath)) { Gui-Log "❌ Mallfilen 'Output_Template.xlsx' saknas!" 'Error'; return }
     try { $pkgOut = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($templatePath)) }
     catch { Gui-Log "❌ Kunde inte läsa mall: $($_.Exception.Message)" 'Error'; return }
+
+    if ($sharePointBatch) {
+        if (PnPMon-InjectInlineIfReady -Pkg $pkgOut -Batch $sharePointBatch) {
+            Gui-Log "🔷 SharePoint-data injicerades direkt i rapporten." 'Info'
+        }
+    }
 
     # --- Signera NEG/POS (flik 2→, endast H3 som börjar med siffra) ---
     $signToWrite = ($txtSigner.Text + '').Trim()
@@ -1782,12 +2229,15 @@ if ($sigMismatch) {
         Gui-Log "💾 Sparläge: Temporärt → $SavePath"
     }
 
+    if ($sharePointBatch) { PnPMon-SetPendingReportPath $SavePath }
+
     try {
         $pkgOut.Workbook.View.ActiveTab = 0
         $pkgOut.Workbook.Worksheets["Seal Test Output"].View.TabSelected = $true
         $pkgOut.SaveAs($SavePath)
         Gui-Log "✅ Rapport sparad: $SavePath" 'Info'
         $global:LastReportPath = $SavePath
+        if ($sharePointBatch) { PnPMon-SetPendingReportPath $SavePath }
 
         # --- Revisionsfil (audit) ---
         try {
