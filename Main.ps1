@@ -3587,26 +3587,26 @@ try {
                             }
                         }
                     }
-if ($counts.Count -gt 0) {
-    $sorted = $counts.GetEnumerator() | Sort-Object Key
+                    if ($counts.Count -gt 0) {
+                        $sortedEntries   = @($counts.GetEnumerator() | Sort-Object Key)
+                        $lspSummaryParts = @()
 
-    $lspSummaryParts = @()
-    foreach ($kvp in $sorted) {
-        $part = if ($kvp.Value -gt 1) { "$($kvp.Key) x$($kvp.Value)" } else { $kvp.Key }
-        $lspSummaryParts += $part
-    }
+                        foreach ($kvp in $sortedEntries) {
+                            $part = if ($kvp.Value -gt 1) { "$($kvp.Key) x$($kvp.Value)" } else { $kvp.Key }
+                            $lspSummaryParts += $part
+                        }
 
-    $total = $sorted.Count
+                        $total = $sortedEntries.Count
 
-    if ($total -eq 1) {
-        $lspSummary = $sorted[0].Key
-    }
-    else {
-        $lspSummary = "$total (" + ($lspSummaryParts -join ', ') + ")"
-    }
-}
+                        if ($total -eq 1) {
+                            $lspSummary = $sortedEntries[0].Key
+                        }
+                        else {
+                            $lspSummary = "$total (" + ($lspSummaryParts -join ', ') + ")"
                         }
                     }
+                }
+            }
 
         } catch {
             Gui-Log ("⚠️ Fel vid extraktion av LSP från CSV: " + $_.Exception.Message) 'Warn'
@@ -3621,7 +3621,7 @@ if ($counts.Count -gt 0) {
 # (moved function to top-level: lifted for readability)
 
 
-        $isNewLayout = $true
+        $isNewLayout = $false
         try {
             $tmpRow = Find-InfoRow -Ws $wsInfo -Label 'CSV-Info'
             if ($tmpRow) { $isNewLayout = $true }
@@ -3640,12 +3640,12 @@ if ($counts.Count -gt 0) {
         $rowInst       = Find-InfoRow -Ws $wsInfo -Label 'Använda INF/GX'
 
         $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity'
-if (-not $rowBag) { $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity:' }
-if (-not $rowBag) { $rowBag = 14 }  # fallback till din standardrad
+        if (-not $rowBag) { $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity:' }
+        if (-not $rowBag) { $rowBag = 14 }  # fallback till din standardrad
 
-# --- Skriv exakt en gång till B14 (eller B$rowBag) ---
-$wsInfo.Cells["B$rowBag"].Style.Numberformat.Format = '@'
-$wsInfo.Cells["B$rowBag"].Value = $infSummary
+        # --- Skriv exakt en gång till B14 (eller B$rowBag) ---
+        $wsInfo.Cells["B$rowBag"].Style.Numberformat.Format = '@'
+        $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
         if ($isNewLayout) {
             # Nya layoutens LSP-etikett är "LSP"
