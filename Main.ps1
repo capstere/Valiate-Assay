@@ -1,17 +1,1051 @@
-if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
-    Start-Process -FilePath $PSHome\powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSCommandPath`""; exit
+# === Global toggle: silence auto-injected catch logs ===
+if (-not (Get-Variable -Scope Script -Name SilenceAutoCatchLogs -ErrorAction SilentlyContinue)) { $script:SilenceAutoCatchLogs = $false }
+﻿﻿﻿﻿﻿﻿#region [CHAPTER] PREAMBLE
+# ==============================================
+# ================  DOCMERGE v40  ==============
+# ===========  TABLE OF CONTENTS (TOC) =========
+# ==============================================
+# Jump to sections by searching these anchors:
+#   [CHAPTER] PREAMBLE
+#   [CHAPTER] DEPENDENCIES
+#   [CHAPTER] CORE HELPERS
+#   [CHAPTER] CSV HELPERS
+#   [CHAPTER] HEADER HELPERS
+#   [CHAPTER] UI/WINFORMS
+#   [CHAPTER] EVENT HANDLERS
+#   [CHAPTER] MAIN
+# ==============================================
+
+﻿﻿﻿function Find-LabelValueRightward_Robust {
+
+# ===============================
+# === Report/UI Helper funcs ===
+# === (lifted from click handler)
+# ===============================
+
+if (-not (Get-Command Add-Hyperlink -ErrorAction SilentlyContinue)) {
+
+# (moved Add-Hyperlink to CORE HELPERS)
+
 }
+
+
+if (-not (Get-Command Find-RegexCell -ErrorAction SilentlyContinue)) {
+
+# (moved Find-RegexCell to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Find-ExactLabelRightOf -ErrorAction SilentlyContinue)) {
+
+# (moved Find-ExactLabelRightOf to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Find-HeaderRowCols -ErrorAction SilentlyContinue)) {
+
+# (moved Find-HeaderRowCols to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Normalize-DateString -ErrorAction SilentlyContinue)) {
+
+# (moved Normalize-DateString to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Get-SealHeaderDocInfo -ErrorAction SilentlyContinue)) {
+
+# (moved Get-SealHeaderDocInfo to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Find-InfoRow -ErrorAction SilentlyContinue)) {
+
+# (moved Find-InfoRow to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Find-LabelValueRightward -ErrorAction SilentlyContinue)) {
+
+# (moved Find-LabelValueRightward to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Set-MergedWrapAutoHeight -ErrorAction SilentlyContinue)) {
+
+# (moved Set-MergedWrapAutoHeight to CORE HELPERS)
+
+}
+
+
+if (-not (Get-Command Get-BatchFromSealFile -ErrorAction SilentlyContinue)) {
+
+# (removed duplicate Get-BatchFromSealFile; using CORE HELPERS version)
+
+}
+
+
+    param(
+        [OfficeOpenXml.ExcelWorksheet]$Sheet,
+        [string[]]$LabelPatterns,
+        [string]$StartCell = 'A1',
+        [int]$MaxRows = 30,
+        [int]$MaxCols = 12,
+        [switch]$AsDate
+    )
+    if (-not $Sheet -or -not $Sheet.Dimension) { return '' }
+    $start = $Sheet.Cells[$StartCell]
+    if (-not $start) { $start = $Sheet.Cells['A1'] }
+    $row0 = $start.Start.Row
+    $col0 = $start.Start.Column
+    $maxRow = [Math]::Min($Sheet.Dimension.End.Row,    $row0 + $MaxRows - 1)
+    $maxCol = [Math]::Min($Sheet.Dimension.End.Column, $col0 + $MaxCols - 1)
+
+    for ($r = $row0; $r -le $maxRow; $r++) {
+        for ($c = $col0; $c -le $maxCol; $c++) {
+            $labelCell = $Sheet.Cells[$r, $c]
+            if ($null -eq $labelCell) { continue }
+            $lbl = Normalize-HeaderText $labelCell.Text
+            if ([string]::IsNullOrWhiteSpace($lbl)) { continue }
+            foreach ($pat in $LabelPatterns) {
+                if ($lbl -match $pat) {
+                    $valCell = $Sheet.Cells[$r, $c + 1]
+                    if ($AsDate) {
+                        $tmp = $null
+                        if (Try-Parse-HeaderDate $valCell.Value ([ref]$tmp)) {
+                            return $tmp.ToString('yyyy-MM-dd')
+                        } else {
+                            return (Normalize-HeaderValue $valCell.Text)
+                        }
+                    } else {
+                        return (Normalize-HeaderValue (if ($valCell.Value -ne $null) { $valCell.Value } else { $valCell.Text }))
+                    }
+                }
+            }
+        }
+    }
+    return ''
+}
+
+# Broad regex patterns for header labels
+$script:RePartNo      = '(?i)^(part\s*no(\.|number)?|p\/?n|pn)$'
+$script:ReBatchNo     = '(?i)^(batch\s*no(\.|number)?(s)?|batch\s*\#|batch)$'
+$script:ReCartridgeNo = '(?i)^(cartridge\s*no(\.|number)?\s*\(lsp\)|cartridge\s*no(\.|number)?|lsp)$'
+$script:ReDocNo       = '(?i)^(document\s*no(\.|number)?|doc\s*no\.?|doc\#)$'
+$script:ReRev         = '(?i)^(rev(ision)?|version)$'
+$script:ReEffective   = '(?i)^(effective|effective\s*date|ikraft|gäller\s*från)$'
+
+# (moved Extract-WorksheetHeader_Robust to HEADER HELPERS)
+
+# (moved Get-WorksheetHeaderPerSheet to HEADER HELPERS)
+
+
+function Compare-WorksheetHeaderRows {
+    param([Parameter(Mandatory)][object[]]$Rows)
+    $out = [pscustomobject]@{ Issues=0; Summary=''; Details='' }
+    if (-not $Rows -or $Rows.Count -lt 2) { return $out }
+    $cons = $Rows[0].Header
+    $details = New-Object System.Collections.Generic.List[string]
+    for ($i=1; $i -lt $Rows.Count; $i++) {
+        $cand = $Rows[$i].Header
+        $name = $Rows[$i].Sheet
+        $diffs = Compare-WorksheetHeaderSet_Robust -Consensus $cons -Candidate $cand -SheetName $name
+        if ($diffs -and $diffs.Count -gt 0) {
+            $out.Issues += $diffs.Count
+            foreach ($d in $diffs) { $details.Add("- $d") }
+        }
+    }
+    if ($out.Issues -gt 0) {
+        $out.Summary = ("{0} skillnader mellan första bladet och övriga" -f $out.Issues)
+        $out.Details = ($details -join "`n")
+    }
+    return $out
+}
+
+# (moved Compare-WorksheetHeaderSet_Robust to HEADER HELPERS)
+
+
+
+#endregion [CHAPTER] PREAMBLE
+
+#endregion [CHAPTER] DEPENDENCIES
+
+#endregion [CHAPTER] CSV HELPERS
+#region [CHAPTER] HEADER HELPERS
+if (-not (Get-Command Get-SealHeaderDocInfo -ErrorAction SilentlyContinue)) {
+function Get-SealHeaderDocInfo {
+            param([OfficeOpenXml.ExcelPackage]$Pkg)
+            $result = [pscustomobject]@{ Raw=''; DocNo=''; Rev='' }
+            if (-not $Pkg) { return $result }
+            $ws = $Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
+            if (-not $ws) { return $result }
+            try {
+                $lt = ($ws.HeaderFooter.OddHeader.LeftAlignedText + '').Trim()
+                if (-not $lt) { $lt = ($ws.HeaderFooter.EvenHeader.LeftAlignedText + '').Trim() }
+                $result.Raw = $lt
+                $rx = [regex]'(?i)(?:document\s*(?:no|nr|#|number)\s*[:#]?\s*([A-Z0-9\-_\.\/]+))?.*?(?:rev(?:ision)?\.?\s*[:#]?\s*([A-Z0-9\-_\.]+))?'
+                $m = $rx.Match($lt)
+                if ($m.Success) {
+                    if ($m.Groups[1].Value) { $result.DocNo = $m.Groups[1].Value.Trim() }
+                    if ($m.Groups[2].Value) { $result.Rev   = $m.Groups[2].Value.Trim() }
+                }
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+            return $result
+        }
+}
+
+if (-not (Get-Command Get-ConsensusValue -ErrorAction SilentlyContinue)) {
+
+function Get-ConsensusValue {
+    param(
+        [string]$Ws,  [string]$Pos, [string]$Neg,
+        [ValidateSet('Batch','Part','Cartridge')] [string]$Type
+    )
+
+    $nWs  = Normalize-Id $Ws  $Type
+    $nPos = Normalize-Id $Pos $Type
+    $nNeg = Normalize-Id $Neg $Type
+
+    # vilka källor har något värde?
+    $present = @{}
+    if ($nWs)  { $present['WS']  = $nWs  }
+    if ($nPos) { $present['POS'] = $nPos }
+    if ($nNeg) { $present['NEG'] = $nNeg }
+
+    $chosenNorm = $null
+    $sources    = @()
+
+    # 1) Majoritet (minst två lika)
+    $counts = @{}
+    foreach ($k in $present.Keys) {
+        $val = $present[$k]
+        if (-not $counts.ContainsKey($val)) { $counts[$val] = 0 }
+        $counts[$val]++
+    }
+    $maxCount = 0; $maxVal = $null
+    foreach ($kv in $counts.GetEnumerator()) {
+        if ($kv.Value -gt $maxCount) { $maxCount = $kv.Value; $maxVal = $kv.Key }
+    }
+    if ($maxCount -ge 2) {
+        $chosenNorm = $maxVal
+        foreach ($k in $present.Keys) { if ($present[$k] -eq $chosenNorm) { $sources += $k } }
+    }
+
+    # 2) Ingen majoritet? Om exakt en av POS/NEG matchar WS ⇒ välj WS
+    if (-not $chosenNorm -and $nWs) {
+        $posMatch = ($nPos -and $nPos -eq $nWs)
+        $negMatch = ($nNeg -and $nNeg -eq $nWs)
+        if (($posMatch -and -not $negMatch) -or ($negMatch -and -not $posMatch)) {
+            $chosenNorm = $nWs
+            $sources = @('WS')
+            if ($posMatch) { $sources += 'POS' }
+            if ($negMatch) { $sources += 'NEG' }
+        }
+    }
+
+    # 3) POS==NEG (och WS saknas/avviker)
+    if (-not $chosenNorm -and $nPos -and $nNeg -and $nPos -eq $nNeg) {
+        $chosenNorm = $nPos
+        $sources = @('POS','NEG')
+    }
+
+    # 4) Annars välj det som finns (prioritet WS > POS > NEG)
+    if (-not $chosenNorm) {
+        if ($nWs)      { $chosenNorm = $nWs;  $sources = @('WS')  }
+        elseif ($nPos) { $chosenNorm = $nPos; $sources = @('POS') }
+        elseif ($nNeg) { $chosenNorm = $nNeg; $sources = @('NEG') }
+    }
+
+    # “Pretty” original (behåll format från första källa i ordning WS>POS>NEG)
+    $orig = @{ WS=$Ws; POS=$Pos; NEG=$Neg }
+    $pretty = $null
+    foreach ($pref in @('WS','POS','NEG')) {
+        if ($present.ContainsKey($pref) -and $present[$pref] -eq $chosenNorm) { $pretty = $orig[$pref]; break }
+    }
+
+    # Note-text (frivillig)
+    $note = $null
+    if ($sources -and $sources.Count -gt 0) {
+        $note = "Consensus: " + ($sources -join '+')
+        $others = @()
+        foreach ($k in @('WS','POS','NEG')) {
+            if ($present.ContainsKey($k) -and ($sources -notcontains $k)) {
+                $val = $orig[$k]
+                if (-not [string]::IsNullOrEmpty($val)) { $others += ($k + '=' + $val) }
+            }
+        }
+        if ($others.Count -gt 0) { $note += " | Others: " + ($others -join ', ') }
+    }
+
+    return @{ Value=$pretty; Source=($sources -join '+'); Note=$note }
+}
+}
+
+if (-not (Get-Command Normalize-Id -ErrorAction SilentlyContinue)) {
+
+function Normalize-Id {
+    param([string]$Value, [ValidateSet('Batch','Part','Cartridge')] [string]$Type)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    $v = $Value.Trim()
+    switch ($Type) {
+        'Batch'     { return ($v -replace '[^\d]', '') }                      # 10 siffror
+        'Part'      { return (($v -replace '[^0-9A-Za-z\-]', '')).ToUpper() } # t.ex. 700-5702
+        'Cartridge' { return ($v -replace '[^\d]', '') }                      # 5 siffror
+        default     { return $v }
+    }
+}
+}
+
+if (-not (Get-Command Extract-SealTestHeader -ErrorAction SilentlyContinue)) {
+    function Extract-SealTestHeader {
+        param([OfficeOpenXml.ExcelPackage]$Pkg)
+
+        $result = [pscustomobject]@{ DocumentNumber=$null; Rev=$null; Effective=$null }
+        if (-not $Pkg) { return $result }
+
+        foreach ($ws in $Pkg.Workbook.Worksheets) {
+            if ($ws.Name -eq 'Worksheet Instructions') { continue }
+            $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim()
+            if (-not $right) { $right = (($ws.HeaderFooter.EvenHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim() }
+
+            if (-not $result.DocumentNumber -and $right -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)\b') { $result.DocumentNumber = $matches[1] }
+            if (-not $result.Rev            -and $right -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
+            if (-not $result.Effective      -and $right -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
+
+            if ($result.DocumentNumber -and $result.Rev -and $result.Effective) { break }
+        }
+        return $result
+    }
+}
+
+if (-not (Get-Command Compare-WorksheetHeaderSet_Robust -ErrorAction SilentlyContinue)) {
+
+function Compare-WorksheetHeaderSet_Robust {
+
+# Precompiled SP regex and CSV indices
+$script:ReSpMarker = New-Object System.Text.RegularExpressions.Regex('_(\d{2})_', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:CSV_IDX_SAMPLE = 2
+$script:CSV_IDX_INSTR  = 5
+$script:CSV_DATA_START_INDEX = 9
+
+
+#endregion [CHAPTER] HEADER HELPERS
+#region [CHAPTER] SP HELPERS
+
+if (-not (Get-Command Get-SpFieldInternalNames -ErrorAction SilentlyContinue)) {
+function Get-SpFieldInternalNames {
+    @('Work_x0020_Center','Title','Batch_x0023_','SAP_x0020_Batch_x0023__x0020_2',
+      'LSP','Material','BBD_x002f_SLED','Actual_x0020_startdate_x002f__x0',
+      'PAL_x0020__x002d__x0020_Sample_x','Sample_x0020_Reagent_x0020_P_x00',
+      'Order_x0020_quantity','Total_x0020_good','ITP_x0020_Test_x0020_results',
+      'IPT_x0020__x002d__x0020_Testing_0','MES_x0020__x002d__x0020_Order_x0')
+}}
+
+if (-not (Get-Command Get-SpRenameMap -ErrorAction SilentlyContinue)) {
+function Get-SpRenameMap {
+    @{
+        'Work Center'                  = 'Work Center'
+        'Title'                        = 'Order#'
+        'Batch#'                       = 'SAP Batch#'
+        'SAP Batch# 2'                 = 'SAP Batch# 2'
+        'LSP'                          = 'LSP'
+        'Material'                     = 'Material'
+        'BBD/SLED'                     = 'BBD/SLED'
+        'Actual startdate/_x0'         = 'ROBAL - Actual start date/time'
+        'PAL - Sample_x'               = 'Sample Reagent use'
+        'Sample Reagent P'             = 'Sample Reagent P/N'
+        'Order quantity'               = 'Order quantity'
+        'Total good'                   = 'ROBAL - Till Packning'
+        'IPT Test results'             = 'IPT Test results'
+        'IPT - Testing_0'              = 'IPT - Testing Finalized'
+        'MES - Order_x0'               = 'MES Order'
+    }
+}}
+
+if (-not (Get-Command Get-SpDesiredOrder -ErrorAction SilentlyContinue)) {
+function Get-SpDesiredOrder {
+    @('Work Center','Order#','SAP Batch#','SAP Batch# 2','LSP','Material','BBD/SLED',
+      'ROBAL - Actual start date/time','Sample Reagent use','Sample Reagent P/N',
+      'Order quantity','ROBAL - Till Packning','IPT Test results',
+      'IPT - Testing Finalized','MES Order')
+}}
+
+if (-not (Get-Command Get-SpDateFields -ErrorAction SilentlyContinue)) {
+function Get-SpDateFields { @('BBD/SLED','ROBAL - Actual start date/time','IPT - Testing Finalized') }
+}
+
+if (-not (Get-Command Get-SpShortDateFields -ErrorAction SilentlyContinue)) {
+function Get-SpShortDateFields { @('BBD/SLED') }
+}
+
+if (-not (Get-Command Normalize-SpLabel -ErrorAction SilentlyContinue)) {
+function Normalize-SpLabel {
+    param([string]$InternalName)
+    if (-not $InternalName) { return '' }
+    $label = $InternalName -replace '_x0020_', ' ' `
+                           -replace '_x002d_', '-' `
+                           -replace '_x0023_', '#' `
+                           -replace '_x002f_', '/' `
+                           -replace '_x2013_', '–' `
+                           -replace '_x00',''
+    $label.Trim()
+}}
+
+if (-not (Get-Command Convert-SpValue -ErrorAction SilentlyContinue)) {
+function Convert-SpValue {
+    param([string]$Label,[object]$Val,[string[]]$DateFields,[string[]]$ShortDateFields)
+    if ($null -eq $Val -or $Val -eq '') { return $null }
+    if ($Val -eq $true)  { return 'JA' }
+    if ($Val -eq $false) { return 'NEJ' }
+
+    $dt = $null
+    if ($Val -is [datetime]) { $dt = [datetime]$Val }
+    else { try { $dt = [datetime]::Parse(($Val + '').Trim()) } catch { $dt = $null } }
+
+    if ($dt -ne $null -and ($DateFields -contains $Label)) {
+        $fmt = if ($ShortDateFields -contains $Label) { 'yyyy-MM-dd' } else { 'yyyy-MM-dd HH:mm' }
+        return $dt.ToString($fmt)
+    }
+    return $Val
+}}
+
+if (-not (Get-Command Build-SpRowsFromListItem -ErrorAction SilentlyContinue)) {
+function Build-SpRowsFromListItem {
+    param(
+        [object]$Item,
+        [hashtable]$RenameMap = $(Get-SpRenameMap),
+        [string[]]$Fields = $(Get-SpFieldInternalNames),
+        [string[]]$DesiredOrder = $(Get-SpDesiredOrder),
+        [string[]]$DateFields = $(Get-SpDateFields),
+        [string[]]$ShortDateFields = $(Get-SpShortDateFields)
+    )
+    $rows = @()
+    foreach ($f in $Fields) {
+        $val = $Item[$f]
+        if ($null -eq $val -or $val -eq '') { continue }
+
+        $label = Normalize-SpLabel $f
+        if ($RenameMap.ContainsKey($label)) { $label = $RenameMap[$label] }
+
+        $conv = Convert-SpValue -Label $label -Val $val -DateFields $DateFields -ShortDateFields $ShortDateFields
+        if ($null -ne $conv -and $conv -ne '') {
+            $rows += [pscustomobject]@{ Rubrik = $label; 'Värde' = $conv }
+        }
+    }
+    if ($rows.Count -gt 0 -and $DesiredOrder.Count -gt 0) {
+        $ordered = @()
+        foreach ($label in $DesiredOrder) {
+            $hit = $rows | Where-Object { $_.Rubrik -eq $label } | Select-Object -First 1
+            if ($hit) { $ordered += $hit }
+        }
+        if ($ordered.Count -gt 0) { $rows = $ordered }
+    }
+    return ,$rows
+}}
+
+if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
+function Write-SPSheet-Safe {
+    param(
+        [OfficeOpenXml.ExcelPackage]$Pkg,
+        [object[]]$Rows,
+        [string[]]$DesiredOrder,
+        [string]$Batch = '—'
+    )
+    if (-not $Pkg) { return $false }
+    $ws = $Pkg.Workbook.Worksheets['SharePoint Info']
+    if ($ws) { $Pkg.Workbook.Worksheets.Delete($ws) }
+    $ws = $Pkg.Workbook.Worksheets.Add('SharePoint Info')
+    $ws.Cells[1,1].Value = 'Rubrik'
+    $ws.Cells[1,2].Value = 'Värde'
+    $r = 2
+    if ($Rows -and $Rows.Count -gt 0) {
+        foreach ($row in $Rows) {
+            $ws.Cells[$r,1].Value = $row.Rubrik
+            $ws.Cells[$r,2].Value = $row.'Värde'
+            $r++
+        }
+    } else {
+        $ws.Cells[2,1].Value = 'Batch'
+        $ws.Cells[2,2].Value = $Batch
+        $ws.Cells[3,1].Value = 'Info'
+        $ws.Cells[3,2].Value = 'No matching SharePoint row'
+    }
+    try { $ws.Cells[$ws.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+    return $true
+}}
+
+
+#endregion [CHAPTER] SP HELPERS
+
+#region [CHAPTER] CORE HELPERS
+if (-not (Get-Command Get-MinitabMacro -ErrorAction SilentlyContinue)) {
+function Get-MinitabMacro { param([string]$AssayName)
+    if ([string]::IsNullOrWhiteSpace($AssayName)) { return $null }
+    $k = Normalize-Assay $AssayName
+    if ($k -and $MinitabIndex.ContainsKey($k)) { return $MinitabIndex[$k] }
+    return $null
+}
+}
+
+if (-not (Get-Command Set-MergedWrapAutoHeight -ErrorAction SilentlyContinue)) {
+function Set-MergedWrapAutoHeight {
+            param([OfficeOpenXml.ExcelWorksheet]$Sheet,[int]$RowIndex,[int]$ColStart=2,[int]$ColEnd=3,[string]$Text)
+            $rng = $Sheet.Cells[$RowIndex, $ColStart, $RowIndex, $ColEnd]
+            $rng.Style.WrapText = $true
+            $rng.Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::None
+            $Sheet.Row($RowIndex).CustomHeight = $false
+            try {
+                $wChars = [Math]::Floor(($Sheet.Column($ColStart).Width + $Sheet.Column($ColEnd).Width) - 2); if ($wChars -lt 1) { $wChars = 1 }
+                $segments = $Text -split "(\r\n|\n|\r)"; $lineCount = 0
+                foreach ($seg in $segments) { if (-not $seg) { $lineCount++ } else { $lineCount += [Math]::Ceiling($seg.Length / $wChars) } }
+                if ($lineCount -lt 1) { $lineCount = 1 }
+                $targetHeight = [Math]::Max(15, [Math]::Ceiling(15 * $lineCount * 2.15))
+                if ($Sheet.Row($RowIndex).Height -lt $targetHeight) {
+                    $Sheet.Row($RowIndex).Height = $targetHeight
+                    $Sheet.Row($RowIndex).CustomHeight = $true
+                }
+            } catch { $Sheet.Row($RowIndex).CustomHeight = $false }
+        }
+}
+
+if (-not (Get-Command Find-LabelValueRightward -ErrorAction SilentlyContinue)) {
+function Find-LabelValueRightward {
+    param(
+        [OfficeOpenXml.ExcelWorksheet]$Ws,
+        [string]$Label,
+        [int]$MaxRows = 200,
+  
+# (moved Get-SealHeaderDocInfo to HEADER HELPERS)
+
+}
+
+if (-not (Get-Command Get-SealHeaderDocInfo -ErrorAction SilentlyContinue)) {
+function Get-SealHeaderDocInfo {
+            param([OfficeOpenXml.ExcelPackage]$Pkg)
+            $result = [pscustomobject]@{ Raw=''; DocNo=''; Rev='' }
+            if (-not $Pkg) { return $result }
+            $ws = $Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
+            if (-not $ws) { return $result }
+            try {
+                $lt = ($ws.HeaderFooter.OddHeader.LeftAlignedText + '').Trim()
+                if (-not $lt) { $lt = ($ws.HeaderFooter.EvenHeader.LeftAlignedText + '').Trim() }
+                $result.Raw = $lt
+                $rx = [regex]'(?i)(?:document\s*(?:no|nr|#|number)\s*[:#]?\s*([A-Z0-9\-_\.\/]+))?.*?(?:rev(?:ision)?\.?\s*[:#]?\s*([A-Z0-9\-_\.]+))?'
+                $m = $rx.Match($lt)
+                if ($m.Success) {
+                    if ($m.Groups[1].Value) { $result.DocNo = $m.Groups[1].Value.Trim() }
+                    if ($m.Groups[2].Value) { $result.Rev   = $m.Groups[2].Value.Trim() }
+                }
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+            return $result
+        }
+}
+
+if (-not (Get-Command Normalize-DateString -ErrorAction SilentlyContinue)) {
+function Normalize-DateString {
+            param([object]$Val)
+            if ($Val -is [datetime]) { return ([datetime]$Val).ToString('yyyy-MM-dd') }
+            $t = ($Val + '').Trim()
+            if (-not $t) { return $null }
+            $m = [regex]::Match($t, '\b\d{4}[- ]?\d{2}[- ]?\d{2}\b')
+            if ($m.Success) {
+                $s = $m.Value.Replace(' ','-')
+                try { return ([datetime]::Parse($s)).ToString('yyyy-MM-dd') } catch { return $s }
+            }
+            try { return ([datetime]::Parse($t)).ToString('yyyy-MM-dd') } catch { return $null }
+        }
+}
+
+if (-not (Get-Command Find-HeaderRowCols -ErrorAction SilentlyContinue)) {
+function Find-HeaderRowCols {
+            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string[]]$Need,[int]$ScanRows=80,[int]$MaxCols=40)
+            if (-not $Ws -or -not $Ws.Dimension) { return $null }
+            $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
+            for ($r=1; $r -le [Math]::Min($Ws.Dimension.End.Row, $ScanRows); $r++) {
+                $map=@{}; $found=0
+                for ($c=1; $c -le $cMax; $c++) {
+                    $h = (($Ws.Cells[$r,$c].Text) + '').Trim()
+                    if (-not $h) { continue }
+                    foreach ($n in $Need) {
+                        if ($map.ContainsKey($n)) { continue }
+                        if ($h -match ('(?i)^\s*' + [regex]::Escape($n) + '\s*$')) { $map[$n]=$c; $found++ }
+                    }
+                }
+                if ($found -eq $Need.Count) { return @{Row=$r;Map=$map} }
+            }
+            return $null
+        }
+}
+
+if (-not (Get-Command Find-ExactLabelRightOf -ErrorAction SilentlyContinue)) {
+function Find-ExactLabelRightOf {
+            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string]$Label,[int]$MaxRows=200,[int]$MaxCols=40)
+            if (-not $Ws -or -not $Ws.Dimension) { return $null }
+            $rx = [regex]::new('(?i)^\s*' + [regex]::Escape($Label) + '\s*$')
+            $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
+            if ($hit -and $hit.Col -lt [Math]::Min($Ws.Dimension.End.Column, $MaxCols)) {
+                return ($Ws.Cells[$hit.Row, $hit.Col+1].Text + '').Trim()
+            }
+            return $null
+        }
+}
+
+if (-not (Get-Command Find-RegexCell -ErrorAction SilentlyContinue)) {
+function Find-RegexCell {
+            param([OfficeOpenXml.ExcelWorksheet]$Ws,[regex]$Rx,[int]$MaxRows=200,[int]$MaxCols=40)
+            if (-not $Ws -or -not $Ws.Dimension) { return $null }
+            $rMax = [Math]::Min($Ws.Dimension.End.Row, $MaxRows)
+            $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
+            for ($r=1; $r -le $rMax; $r++) {
+                for ($c=1; $c -le $cMax; $c++) {
+                    $t = ($Ws.Cells[$r,$c].Text + '').Trim()
+                    if ($t -and $Rx.IsMatch($t)) { return @{Row=$r;Col=$c;Text=$t} }
+                }
+            }
+            return $null
+        }
+}
+
+if (-not (Get-Command Add-Hyperlink -ErrorAction SilentlyContinue)) {
+function Add-Hyperlink {
+            param([OfficeOpenXml.ExcelRange]$Cell,[string]$Text,[string]$Url)
+            try {
+                $Cell.Value = $Text
+                $Cell.Hyperlink = [Uri]$Url
+                $Cell.Style.Font.UnderLine = $true
+                $Cell.Style.Font.Color.SetColor([System.Drawing.Color]::FromArgb(0,102,204))
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+        }
+}
+
+if (-not (Get-Command Get-CheckedFilePath -ErrorAction SilentlyContinue)) {
+
+function Get-CheckedFilePath { param([System.Windows.Forms.CheckedListBox]$clb)
+    for($i=0;$i -lt $clb.Items.Count;$i++){
+        if ($clb.GetItemChecked($i)) {
+            $fi = [System.IO.FileInfo]$clb.Items[$i]
+            return $fi.FullName
+        }
+    }
+    return $null
+}
+}
+
+if (-not (Get-Command Gui-Log -ErrorAction SilentlyContinue)) {
+function Gui-Log {
+    param(
+        [string] $Text,
+        [ValidateSet('Info','Warn','Error')][string] $Severity = 'Info',
+        [switch] $Immediate
+    )
+
+    $prefix    = switch ($Severity) { 'Warn' {'⚠️'} 'Error' {'❌'} default {'ℹ️'} }
+    $timestamp = (Get-Date).ToString('HH:mm:ss')
+    $line      = "[$timestamp] $prefix $Text"
+
+    $append = {
+        $outputBox.AppendText("$line`r`n")
+        $outputBox.SelectionStart = $outputBox.TextLength
+        $outputBox.ScrollToCaret()
+        $outputBox.Refresh()
+    }
+
+    # UI-safe uppdatering (om du i framtiden loggar från annan tråd)
+    if ($outputBox.InvokeRequired) {
+        $null = $outputBox.BeginInvoke([System.Windows.Forms.MethodInvoker]$append)
+    } else {
+        & $append
+    }
+
+    if ($Immediate) {
+        # Rita om direkt så texten hinner visas innan UI:t ev. fryser
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    if ($global:LogPath) {
+        try { Add-Content -Path $global:LogPath -Value $line -Encoding UTF8 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
+}
+}
+
+if (-not (Get-Command Test-FileLocked -ErrorAction SilentlyContinue)) {
+function Test-FileLocked { param([Parameter(Mandatory=$true)][string]$Path)
+    try { $fs = [IO.File]::Open($Path,'Open','ReadWrite','None'); $fs.Close(); return $false } catch { return $true }
+}
+}
+
+if (-not (Get-Command Confirm-SignatureInput -ErrorAction SilentlyContinue)) {
+function Confirm-SignatureInput { param([string]$Text)
+    $info = Test-SignatureFormat $Text
+    $hint = @()
+    if (-not $info.Name) { $hint += '• Namn verkar saknas' }
+    if (-not $info.Sign) { $hint += '• Signatur verkar saknas' }
+    $msg = "Har du skrivit korrekt 'Print Full Name, Sign, and Date'?
+
+Text: $($info.Raw)
+
+Tolkning:
+  • Namn   : $($info.Name)
+  • Sign   : $($info.Sign)
+  • Datum  : $($info.Date)
+
+" + ($(if ($hint.Count){ "Obs:`n  " + ($hint -join "`n  ") } else { "Ser bra ut." }))
+    $res = [System.Windows.Forms.MessageBox]::Show($msg, "Bekräfta signatur", 'YesNo', 'Question')
+    return ($res -eq 'Yes')
+}
+}
+
+if (-not (Get-Command Set-RowBorder -ErrorAction SilentlyContinue)) {
+function Set-RowBorder {
+    param ($ws, [int] $row, [int] $firstRow, [int] $lastRow)
+    foreach ($col in 'B','C','D','E','F','G','H') {
+        $ws.Cells["$col$row"].Style.Border.Left.Style   = "None"
+        $ws.Cells["$col$row"].Style.Border.Right.Style  = "None"
+        $ws.Cells["$col$row"].Style.Border.Top.Style    = "None"
+    
+# (moved Style-Cell to CORE HELPERS)
+$ws.Cells["$col$row"].Style.Border.Bottom.Style = $bottomStyle
+    }
+}
+}
+
+if (-not (Get-Command Style-Cell -ErrorAction SilentlyContinue)) {
+function Style-Cell { param($cell,$bold,$bg,$border,$fontColor)
+    if ($bold) { $cell.Style.Font.Bold = $true }
+    if ($bg)   { $cell.Style.Fill.PatternType = "Solid"; $cell.Style.Fill.BackgroundColor.SetColor([System.Drawing.ColorTranslator]::FromHtml("#$bg")) }
+    if ($fontColor) { $cell.Style.Font.Color.SetColor([System.Drawing.ColorTranslator]::FromHtml("#$fontColor")) }
+    if ($border) { $cell.Style.Border.Top.Style=$border; $cell.Style.Border.Bottom.Style=$border; $cell.Style.Border.Left.Style=$border; $cell.Style.Border.Right.Style=$border }
+}
+}
+
+#endregion [CHAPTER] CORE HELPERS
+#region [CHAPTER] CSV HELPERS
+if (-not (Get-Command Get-InfinitySpFromCsvStrict -ErrorAction SilentlyContinue)) {
+function Get-InfinitySpFromCsvStrict {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Alias('InfinitySerials')][string[]]$InstrumentSerials
+    )
+    $counts = @{}
+    $delim = Get-CsvDelimiterStrict -Path $Path
+    $sr = [System.IO.StreamReader]::new($Path,[System.Text.Encoding]::Default,$true)
+    try {
+        $lineNo = 0
+        while (($line = $sr.ReadLine()) -ne $null) {
+            if ($lineNo -lt $script:CSV_DATA_START_INDEX) { $lineNo++; continue }
+            if ([string]::IsNullOrWhiteSpace($line)) { $lineNo++; continue }
+            $fields = $line.Split($delim)
+            if ($fields.Length -le [Math]::Max($script:CSV_IDX_SAMPLE, $script:CSV_IDX_INSTR)) { $lineNo++; continue }
+            $instr  = $fields[$script:CSV_IDX_INSTR].Trim()
+            if ([string]::IsNullOrWhiteSpace($instr)) { $lineNo++; continue }
+            if (-not ($InstrumentSerials -contains $instr)) { $lineNo++; continue }
+            $sample = $fields[$script:CSV_IDX_SAMPLE]
+            if ([string]::IsNullOrWhiteSpace($sample)) { $lineNo++; continue }
+            $m = $script:ReSpMarker.Match($sample)
+            if ($m.Success) {
+                $n = 0
+                if ([int]::TryParse($m.Groups[1].Value, [ref]$n)) {
+                    if ($n -ge 0 -and $n -le 10) {
+                        if (-not $counts.ContainsKey($n)) { $counts[$n] = 0 }
+                        $counts[$n]++
+                    }
+                }
+            }
+            $lineNo++
+        }
+    } finally { $sr.Dispose() }
+    if ($counts.Count -eq 0) { return '—' }
+    $present = @(
+        $counts.GetEnumerator() | Where-Object { $_.Value -gt 0 } | ForEach-Object { [int]$_.Key } | Sort-Object
+    )
+    if ($present.Count -eq 0) { return '—' }
+    $parts = New-Object System.Collections.Generic.List[string]
+    $i = 0
+    while ($i -lt $present.Count) {
+        $start = $present[$i]; $end = $start
+        $j = $i + 1
+        while ($j -lt $present.Count -and $present[$j] -eq ($end + 1)) { $end = $present[$j]; $j++ }
+        if ($start -eq $end) { $parts.Add( ('#{0:00}' -f $start) ) } else { $parts.Add( ('#{0:00}-{1:00}' -f $start, $end) ) }
+        $i = $j
+    }
+    $total = ($counts.Values | Measure-Object -Sum).Sum
+    return ( ($parts -join '+') + (' x{0}' -f $total) )
+}
+}
+
+if (-not (Get-Command Get-CsvStats -ErrorAction SilentlyContinue)) {
+
+function Get-CsvStats {
+    <#
+      Returnerar objekt:
+      TestCount, DupCount, Duplicates[], LspValues[], LspOK, InstrumentByType (ordered)
+    #>
+    param([string]$Path)
+
+    $out = [ordered]@{
+        TestCount       = 0
+        DupCount        = 0
+        Duplicates      = @()
+        LspValues       = @()
+        LspOK           = $null
+        InstrumentByType= [ordered]@{}
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]$out }
+
+    $lines = Get-Content -LiteralPath $Path
+    if (-not $lines -or $lines.Count -lt 8) { return [pscustomobject]$out }
+
+    # Försök tolka headern från rad 8 (index 7)
+    $header = ConvertTo-CsvFields $lines[7]
+    $dataLines = @()
+    if ($lines.Count -gt 9) { $dataLines = $lines[9..($lines.Count-1)] }
+
+    # Primär: använd headernamn om de finns
+    $csv = $null
+    try {
+        if ($dataLines.Count -gt 0) {
+            $csv = ConvertFrom-Csv -InputObject ($dataLines -join "`n") -Header $header
+        }
+    } catch { $csv = $null }
+
+    # Fångare
+    $cartSnList = New-Object System.Collections.Generic.List[string]
+    $lspList    = New-Object System.Collections.Generic.List[string]
+    $instrList  = New-Object System.Collections.Generic.List[string]
+
+    if ($csv) {
+        foreach ($row in $csv) {
+            # Tolerant hämtning via headernamn OCH fallback på index
+            $cart = $row.'Cartridge S/N'
+            $lsp  = $row.'Reagent Lot ID'  # fallback kolumn E (0-baserad index 4)
+            $ins  = $row.'Instrument S/N'
+
+            if (-not $cart) { try { $cart = $row.Item(3) } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }  # kolumn D
+            if (-not $ins)  { try { $ins  = $row.Item(6) } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }  # kolumn G
+
+            if ($cart) { $cartSnList.Add( ($cart + '').Trim() ) }
+            if ($lsp)  { $lspList.Add(  ($lsp  + '').Trim() ) }
+            if ($ins)  { $instrList.Add(($ins  + '').Trim() ) }
+        }
+    } else {
+        # Helt utan ConvertFrom-Csv: plocka kolumn D/E/G via index
+        foreach ($ln in $dataLines) {
+            if (-not $ln -or -not $ln.Trim()) { continue }
+            $f = ConvertTo-CsvFields $ln
+            if ($f.Count -lt 7) { continue }
+            $cartSnList.Add( ($f[3] + '').Trim() )
+            $lspList.Add(    ($f[4] + '').Trim() )
+            $instrList.Add(  ($f[6] + '').Trim() )
+        }
+    }
+
+    # Testcount = antal icke-tomma Cartridge S/N
+    $cartSn = $cartSnList | Where-Object { $_ -and $_ -ne '' }
+    $out.TestCount = @($cartSn).Count
+
+    # Dubbletter
+    $dups = $cartSn | Group-Object | Where-Object { $_.Count -gt 1 }
+    if ($dups) {
+        $out.DupCount   = $dups.Count
+        $out.Duplicates = $dups | ForEach-Object { "$($_.Name) x$($_.Count)" }
+    }
+
+    # LSP (unika femsiffriga — tolerant)
+    $lspClean = $lspList | ForEach-Object {
+        $m = [regex]::Match($_, '(?<!\d)(\d{5})(?!\d)')
+        if ($m.Success) { $m.Groups[1].Value } else { $null }
+    } | Where-Object { $_ } | Select-Object -Unique
+    $out.LspValues = $lspClean
+    if ($lspClean.Count -gt 0) {
+        $out.LspOK = ($lspClean.Count -eq 1)
+    }
+
+    # Instrument → typ
+    # Förbered lookups
+    $lut = @{}
+    foreach ($k in $script:GXINF_Map.Keys) {
+        $codes = $script:GXINF_Map[$k].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        foreach ($code in $codes) { $lut[$code] = $k }
+    }
+    foreach ($ins in ($instrList | Where-Object { $_ })) {
+        $t = $null
+        if ($lut.ContainsKey($ins)) { $t = $lut[$ins] } else { $t = 'Unknown' }
+        if (-not $out.InstrumentByType.Contains($t)) { $out.InstrumentByType[$t] = 0 }
+        $out.InstrumentByType[$t]++
+    }
+
+    return [pscustomobject]$out
+}
+}
+
+if (-not (Get-Command ConvertTo-CsvFields -ErrorAction SilentlyContinue)) {
+
+function ConvertTo-CsvFields {
+    param([string]$Line)
+    # CSV-split som respekterar citat
+    return [regex]::Split($Line, ',(?=(?:[^"]*"[^"]*")*[^"]*$)')
+}
+}
+
+if (-not (Get-Command Import-CsvRows -ErrorAction SilentlyContinue)) {
+
+function Import-CsvRows { param([string]$Path,[int]$StartRow=10)
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $delim=Get-CsvDelimiter $Path; $tp=$null; $rows=@()
+    try {
+        $tp = New-TextFieldParser -Path $Path -Delimiter $delim
+        $r=0
+        while (-not $tp.EndOfData) {
+            $r++; $f=$tp.ReadFields()
+            if ($r -lt $StartRow) { continue }
+            if (-not $f -or ($f -join '').Trim().Length -eq 0) { continue }
+            $rows += ,$f
+        }
+    } finally { if ($tp){$tp.Close()} }
+    return ,@($rows)
+}
+}
+
+function Get-CsvDelimiterStrict {
+    param([Parameter(Mandatory)][string]$Path)
+    $comma=0; $semi=0; $i=0
+    $sr = [System.IO.StreamReader]::new($Path,[System.Text.Encoding]::Default,$true)
+    try {
+        $lineNo = 0
+        while (($line = $sr.ReadLine()) -ne $null) {
+            if ($lineNo -ge 9) {
+                if ($line.Trim().Length -gt 0) {
+                    $comma += ($line.Split(',')).Length - 1
+                    $semi  += ($line.Split(';')).Length - 1
+                    $i++
+                    if ($i -ge 25) { break }
+                }
+            }
+            $lineNo++
+        }
+    } finally { $sr.Dispose() }
+    if ($comma -gt $semi) { return ',' } else { return ';' }
+}
+    param(
+        [hashtable]$Consensus,
+        [hashtable]$Candidate,
+        [string]$SheetName
+    )
+    $diffs = @()
+    function _canon([string]$raw, [string]$type) {
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        $txt = Normalize-HeaderText $raw
+        switch ($type) {
+            'EFF' {
+                $dt = $null
+                if (Try-Parse-HeaderDate $txt ([ref]$dt)) { return $dt.ToString('yyyy-MM-dd') }
+                return $txt
+            }
+            default { return $txt }
+        }
+    }
+    foreach ($k in $Consensus.Keys) {
+        $left  = _canon $Consensus[$k] $k
+        $right = _canon $Candidate[$k] $k
+        if ($left -ne $right) {
+            $diffs += "$SheetName: $k = '$right' (≠ '$left')"
+        }
+    }
+    return ,$diffs
+}
+}
+
+if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)) {
+
+# (removed duplicate Get-WorksheetHeaderPerSheet; using HEADER HELPERS version)
+
+}
+
+if (-not (Get-Command Extract-WorksheetHeader_Robust -ErrorAction SilentlyContinue)) {
+
+# (removed duplicate Extract-WorksheetHeader_Robust; using HEADER HELPERS version)
+
+}
+
+function Normalize-HeaderText {
+    param([string]$s)
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    $s = $s -replace "[\uFEFF\u200B]", ""
+    $s = $s -replace "[\u00A0\u2007\u202F]", " "
+    $s = $s -replace "[\u2013\u2014\u2212]", "-"
+    $s = ($s -replace "\s+", " ").Trim()
+    return $s
+}
+
+function Normalize-HeaderValue {
+    param([object]$v)
+    if ($null -eq $v) { return '' }
+    if ($v -is [double] -or $v -is [int]) {
+        try { return ([DateTime]::FromOADate([double]$v)).ToString("yyyy-MM-dd") } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
+    if ($v -is [DateTime]) { return ([DateTime]$v).ToString("yyyy-MM-dd") }
+    return (Normalize-HeaderText ([string]$v))
+}
+
+function Try-Parse-HeaderDate {
+    param([object]$cellValue, [ref]$out)
+    $out.Value = $null
+    if ($null -eq $cellValue) { return $false }
+
+    if ($cellValue -is [double] -or $cellValue -is [int]) {
+        try { $out.Value = [DateTime]::FromOADate([double]$cellValue); return $true } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
+    if ($cellValue -is [DateTime]) { $out.Value = [DateTime]$cellValue; return $true }
+
+    $s = Normalize-HeaderText ([string]$cellValue)
+    if ([string]::IsNullOrWhiteSpace($s)) { return $false }
+
+    $cultures = @('sv-SE','en-US','en-GB')
+    foreach ($c in $cultures) {
+        try {
+            $dt = [DateTime]::Parse($s, [System.Globalization.CultureInfo]::GetCultureInfo($c), [System.Globalization.DateTimeStyles]::AssumeLocal)
+            $out.Value = $dt; return $true
+        } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
+    $formats = @('yyyy-MM-dd','yyyy/MM/dd','dd/MM/yyyy','d/M/yyyy','MM/dd/yyyy','M/d/yyyy','dd-MM-yyyy','d-M-yyyy','dd.M.yyyy','d.M.yyyy','dd-MMM-yyyy','MMM-yy')
+    foreach ($fmt in $formats) {
+        try {
+            $dt = [DateTime]::ParseExact($s, $fmt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeLocal)
+            $out.Value = $dt; return $true
+        } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
+    return $false
+}
+
+if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
+    $exe = Join-Path $PSHome 'powershell.exe'
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    Start-Process -FilePath $exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -File `"$scriptPath`""
+    exit
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.ComponentModel
 try {
     Add-Type -AssemblyName 'Microsoft.VisualBasic' -ErrorAction SilentlyContinue
-} catch {}
+} catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
 $global:Splash = $null
 function Show-Splash([string]$msg="Startar…") {
-    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-    $f = New-Object Windows.Forms.Form
+    
+    $f = #region [CHAPTER] UI/WINFORMS
+New-Object Windows.Forms.Form
     $f.FormBorderStyle = 'None'
     $f.StartPosition   = 'CenterScreen'
     $f.BackColor = [Drawing.Color]::FromArgb(0,120,215)
@@ -44,7 +1078,7 @@ $global:SpError     = $null
 # 0) NuGet + PnP-modul
 try {
     $null = Get-PackageProvider -Name "NuGet" -ForceBootstrap -ErrorAction SilentlyContinue
-} catch {}
+} catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 try {
     Update-Splash "Laddar PnP.PowerShell…"
 Import-Module PnP.PowerShell -ErrorAction Stop
@@ -64,6 +1098,7 @@ $global:SP_ClientId   = "INSERT MYSELF"
 $global:SP_Tenant     = "danaher.onmicrosoft.com"
 $global:SP_CertBase64 = "INSERT MYSELF"
 $global:SP_SiteUrl    = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management"
+
 if (-not $global:SpError) {
     try {
         Update-Splash "Ansluter till SharePoint"
@@ -82,7 +1117,7 @@ if (-not $global:SpError) {
 }
 
 # === Inställningar ===
-$ScriptVersion = "v40.0"
+$ScriptVersion = "v40.1"
 $PSScriptRoot  = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $RootPaths = @(
@@ -103,8 +1138,6 @@ $Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Kontr
 $Script3Path  = 'N:\QC\QC-1\IPT\1. IPT - KOMMANDE TESTER\Mappscript\1. mappscript\Script.ps1'
 
 # === Centraliserad konfiguration ===
-# Denna hashtable samlar alla sökvägar och inställningar på ett ställe.
-# Uppdatera värdena vid behov – GUI:t kommer att skriva över filvägar när användaren väljer filer.
 $Config = [ordered]@{
     # Källfiler (kan lämnas tomma; fylls i via GUI)
     CsvPath       = ''           # Sökväg till CSV-fil
@@ -138,10 +1171,6 @@ $script:GXINF_Map = @{
 }
 
 # === Fallback-funktioner ===
-# Om Gui-Log, Style-Cell eller Set-RowBorder inte är definierade någon annanstans så skapas enkla stubbar.
-# Fallback-funktionerna har tagits bort eftersom fullständiga implementationer
-# av Gui-Log, Style-Cell och Set-RowBorder definieras senare i skriptet.
-
 
 # Filtrering i SharePoint. {BatchNumber} och {LSP} ersätts automatiskt.
 $SharePointBatchLinkTemplate = 'https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?viewid=6c9e53c9-a377-40c1-a154-13a13866b52b&view=7&q={BatchNumber}'
@@ -149,7 +1178,7 @@ $SharePointBatchLinkTemplate = 'https://danaher.sharepoint.com/sites/CEP-Sweden-
 # === Logg: alltid till $PSScriptRoot\Loggar ===
 $DevLogDir = Join-Path $PSScriptRoot 'Loggar'
 if (-not (Test-Path $DevLogDir)) { New-Item -ItemType Directory -Path $DevLogDir -Force | Out-Null }
-$global:LogPath = Join-Path $DevLogDir ("DocMerge_{0:yyyyMMdd_HHmmss}.txt" -f (Get-Date))
+$global:LogPath = Join-Path $DevLogDir ("$($env:USERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt" -f (Get-Date))
 
 # === Ikoner ===
 
@@ -240,7 +1269,7 @@ function Get-WinAccentColor {
         $p = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\DWM' -ErrorAction Stop
         $argb = if($p.AccentColor){$p.AccentColor}elseif($p.ColorizationColor){$p.ColorizationColor}else{$null}
         if($argb){ return [System.Drawing.Color]::FromArgb([int]$argb) }
-    } catch {}
+    } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     return [System.Drawing.Color]::FromArgb(38,120,178)
 }
 function New-Color { param([int]$A,[int]$R,[int]$G,[int]$B) [System.Drawing.Color]::FromArgb($A,$R,$G,$B) }
@@ -502,7 +1531,7 @@ try {
         # Höjdjustering av gruppen (samma stil som hos dig)
         $grpPick.Height = (78*4) + $grpPick.Padding.Top + $grpPick.Padding.Bottom + 15
     }
-} catch {}
+} catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
 # Skapa kontroller (återanvänder din helper New-ListRow)
 $lblLsp = $null; $clbLsp = $null; $btnLspBrowse = $null
@@ -641,57 +1670,45 @@ $slBatchLink.add_Click({
     }
 })
 
-$status.Items.AddRange(@($slCount,$slSpacer,$slBatchLink))
-
-# ================= ToolStripContainer-layout =================
-$tsc = New-Object System.Windows.Forms.ToolStripContainer
-$tsc.Dock = 'Fill'
-$tsc.LeftToolStripPanelVisible  = $false
-$tsc.RightToolStripPanelVisible = $false
-
-$form.SuspendLayout()
-$form.Controls.Clear()
-$form.Controls.Add($tsc)
-
-# Meny högst upp
-$tsc.TopToolStripPanel.Controls.Add($menuStrip)
-$form.MainMenuStrip = $menuStrip
-
-# Status längst ner
-$tsc.BottomToolStripPanel.Controls.Add($status)
-
-# Content i mitten
-$content = New-Object System.Windows.Forms.Panel
-$content.Dock='Fill'
-$content.BackColor = $form.BackColor
-$tsc.ContentPanel.Controls.Add($content)
-
-# Dock=Top: nedersta först
-$content.SuspendLayout()
-$content.Controls.Add($btnBuild)
-$content.Controls.Add($grpSave)
-$content.Controls.Add($grpSign)
-$content.Controls.Add($grpPick)
-$content.Controls.Add($pLog)
-$content.Controls.Add($tlSearch)
-$content.Controls.Add($panelHeader)
-$content.ResumeLayout()
-
-$form.ResumeLayout()
-$form.PerformLayout()
-
+$status
+# (moved Gui-Log to CORE HELPERS)
 # Enter = "Sök filer"
 $form.AcceptButton = $btnScan
 
 # === Logg ===
 function Gui-Log {
-    param([string] $Text,[ValidateSet('Info','Warn','Error')][string] $Severity = 'Info')
-    $prefix = switch ($Severity) { 'Warn' {'⚠️'} 'Error' {'❌'} default {'ℹ️'} }
+    param(
+        [string] $Text,
+        [ValidateSet('Info','Warn','Error')][string] $Severity = 'Info',
+        [switch] $Immediate
+    )
+
+    $prefix    = switch ($Severity) { 'Warn' {'⚠️'} 'Error' {'❌'} default {'ℹ️'} }
     $timestamp = (Get-Date).ToString('HH:mm:ss')
-    $line = "[$timestamp] $prefix $Text"
-    $outputBox.AppendText("$line`r`n")
-    $outputBox.Refresh()
-    if ($global:LogPath) { Add-Content -Path $global:LogPath -Value $line }
+    $line      = "[$timestamp] $prefix $Text"
+
+    $append = {
+        $outputBox.AppendText("$line`r`n")
+        $outputBox.SelectionStart = $outputBox.TextLength
+        $outputBox.ScrollToCaret()
+        $outputBox.Refresh()
+    }
+
+    # UI-safe uppdatering (om du i framtiden loggar från annan tråd)
+    if ($outputBox.InvokeRequired) {
+        $null = $outputBox.BeginInvoke([System.Windows.Forms.MethodInvoker]$append)
+    } else {
+        & $append
+    }
+
+    if ($Immediate) {
+        # Rita om direkt så texten hinner visas innan UI:t ev. fryser
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    if ($global:LogPath) {
+        try { Add-Content -Path $global:LogPath -Value $line -Encoding UTF8 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    }
 }
 
 # === EPPlus ===
@@ -751,7 +1768,7 @@ function Ensure-EPPlus {
                 if (-not (Test-Path -LiteralPath $localScriptDll)) {
                     Copy-Item -Path $dllCandidates.FullName -Destination $localScriptDll -Force -ErrorAction SilentlyContinue
                 }
-            } catch {}
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             return $localScriptDll
         }
         }
@@ -762,131 +1779,17 @@ function Ensure-EPPlus {
     return $null
 }
 
-function Load-EPPlus {
-    if ([System.AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'EPPlus' }) { return $true }
-    $dllPath = Ensure-EPPlus -Version '4.5.3.3'
-    if (-not $dllPath) { return $false }
-    try {
-        $bytes = [System.IO.File]::ReadAllBytes($dllPath)
-        [System.Reflection.Assembly]::Load($bytes) | Out-Null
-        return $true
-    } catch {
-        Write-Warning "❌ EPPlus-fel: $($_.Exception.Message)"
+#region [CHAPTER] DEPENDENCIES
+fu
+# (moved Set-RowBorder to CORE HELPERS)
+ception.Message)"
         return $false
     }
 }
 
-# === Style hjälpare ===
-function Set-RowBorder {
-    param ($ws, [int] $row, [int] $firstRow, [int] $lastRow)
-    foreach ($col in 'B','C','D','E','F','G','H') {
-        $ws.Cells["$col$row"].Style.Border.Left.Style   = "None"
-        $ws.Cells["$col$row"].Style.Border.Right.Style  = "None"
-        $ws.Cells["$col$row"].Style.Border.Top.Style    = "None"
-        $ws.Cells["$col$row"].Style.Border.Bottom.Style = "None"
-    }
-    $ws.Cells["B$row"].Style.Border.Left.Style  = "Medium"
-    $ws.Cells["H$row"].Style.Border.Right.Style = "Medium"
-    foreach ($col in 'B','C','D','E','F','G') { $ws.Cells["$col$row"].Style.Border.Right.Style = "Thin" }
-    $topStyle = if ($row -eq $firstRow) { "Medium" } else { "Thin" }
-    $bottomStyle = if ($row -eq $lastRow)  { "Medium" } else { "Thin" }
-    foreach ($col in 'B','C','D','E','F','G','H') {
-        $ws.Cells["$col$row"].Style.Border.Top.Style    = $topStyle
-        $ws.Cells["$col$row"].Style.Border.Bottom.Style = $bottomStyle
-    }
-}
-function Style-Cell { param($cell,$bold,$bg,$border,$fontColor)
-    if ($bold) { $cell.Style.Font.Bold = $true }
-    if ($bg)   { $cell.Style.Fill.PatternType = "Solid"; $cell.Style.Fill.BackgroundColor.SetColor([System.Drawing.ColorTranslator]::FromHtml("#$bg")) }
-    if ($fontColor) { $cell.Style.Font.Color.SetColor([System.Drawing.ColorTranslator]::FromHtml("#$fontColor")) }
-    if ($border) { $cell.Style.Border.Top.Style=$border; $cell.Style.Border.Bottom.Style=$border; $cell.Style.Border.Left.Style=$border; $cell.Style.Border.Right.Style=$border }
-}
-
-# Utility: test if a file is locked (opened in Excel)
-function Test-FileLocked { param([Parameter(Mandatory=$true)][string]$Path)
-    try { $fs = [IO.File]::Open($Path,'Open','ReadWrite','None'); $fs.Close(); return $false } catch { return $true }
-}
-
-# === CSV-hjälpmetoder ===
-function Get-CsvDelimiter { param([string]$Path)
-    $first = Get-Content -LiteralPath $Path -Encoding Default -TotalCount 30 | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1
-    if (-not $first) { return ';' }
-    $sc = ($first -split ';').Count; $cc = ($first -split ',').Count
-    if ($cc -gt $sc -and $cc -ge 2) { return ',' } else { return ';' }
-}
-function New-TextFieldParser { param([string]$Path,[string]$Delimiter)
-    $tp = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($Path, [System.Text.Encoding]::Default)
-    $tp.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
-    $tp.SetDelimiters($Delimiter)
-    $tp.HasFieldsEnclosedInQuotes = $true
-    $tp.TrimWhiteSpace = $true
-    return $tp
-}
-function Get-AssayFromCsv { param([string]$Path,[int]$StartRow=10)
-    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $tp = $null; $delim=Get-CsvDelimiter $Path; $row=0
-    try {
-        $tp = New-TextFieldParser -Path $Path -Delimiter $delim
-        while (-not $tp.EndOfData) {
-            $row++; $f = $tp.ReadFields()
-            if ($row -lt $StartRow) { continue }
-            if (-not $f -or $f.Length -lt 1) { continue }
-            $a=([string]$f[0]).Trim()
-            if ($a -and $a -notmatch '^(?i)\s*assay\s*$') { return $a }
-        }
-    } finally { if ($tp){$tp.Close()} }
-    return $null
-}
-
-# === CSV Instrument map + stats (robust PS 5.1) ===
-if (-not (Get-Variable -Name GXINF_Map -Scope Script -ErrorAction SilentlyContinue)) {
-    $script:GXINF_Map = @{
-        'Infinity-VI'   = '847922'
-        'Infinity-VIII' = '803094'
-        'GX5'           = '750210,750211,750212,750213'
-        'GX6'           = '750246,750247,750248,750249'
-        'GX1'           = '709863,709864,709865,709866'
-        'GX2'           = '709951,709952,709953,709954'
-        'GX3'           = '710084,710085,710086,710087'
-        'GX7'           = '750170,750171,750172,750213'
-        'Infinity-I'    = '802069'
-        'Infinity-III'  = '807363'
-        'Infinity-V'    = '839032'
-    }
-}
-if (-not (Get-Command Get-InstrumentMap -ErrorAction SilentlyContinue)) {
-    function Get-InstrumentMap {
-        # returns hashtable number->type
-        $map = @{}
-        foreach ($k in $script:GXINF_Map.Keys) {
-            $vals = ($script:GXINF_Map[$k] + '') -split ',' | ForEach-Object { ($_ + '').Trim() } | Where-Object { $_ }
-            foreach ($v in $vals) { if (-not $map.ContainsKey($v)) { $map[$v] = $k } }
-        }
-        return $map
-    }
-}
-# Analyze-CsvStats har tagits bort då Get-CsvStats används istället.
-# Den förenklade Set-InfoByLabel från fallback-sektionen har tagits bort.
-# Den fullständiga implementeringen finns senare i skriptet.
-function Import-CsvRows { param([string]$Path,[int]$StartRow=10)
-    if (-not (Test-Path -LiteralPath $Path)) { return @() }
-    $delim=Get-CsvDelimiter $Path; $tp=$null; $rows=@()
-    try {
-        $tp = New-TextFieldParser -Path $Path -Delimiter $delim
-        $r=0
-        while (-not $tp.EndOfData) {
-            $r++; $f=$tp.ReadFields()
-            if ($r -lt $StartRow) { continue }
-            if (-not $f -or ($f -join '').Trim().Length -eq 0) { continue }
-            $rows += ,$f
-        }
-    } finally { if ($tp){$tp.Close()} }
-    return ,@($rows)
-}
-
-function ConvertTo-CsvFields {
-    param([string]$Line)
-    # CSV-split som respekterar citat
+# === Style hjälpare =
+# (moved Get-CsvStats to CSV HELPERS)
+citat
     return [regex]::Split($Line, ',(?=(?:[^"]*"[^"]*")*[^"]*$)')
 }
 
@@ -933,11 +1836,11 @@ function Get-CsvStats {
         foreach ($row in $csv) {
             # Tolerant hämtning via headernamn OCH fallback på index
             $cart = $row.'Cartridge S/N'
-            $lsp  = $row.Item(4)  # fallback kolumn E (0-baserad index 4)
+            $lsp  = $row.'Reagent Lot ID'  # fallback kolumn E (0-baserad index 4)
             $ins  = $row.'Instrument S/N'
 
-            if (-not $cart) { try { $cart = $row.Item(3) } catch {} }  # kolumn D
-            if (-not $ins)  { try { $ins  = $row.Item(6) } catch {} }  # kolumn G
+            if (-not $cart) { try { $cart = $row.Item(3) } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }  # kolumn D
+            if (-not $ins)  { try { $ins  = $row.Item(6) } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }  # kolumn G
 
             if ($cart) { $cartSnList.Add( ($cart + '').Trim() ) }
             if ($lsp)  { $lspList.Add(  ($lsp  + '').Trim() ) }
@@ -993,20 +1896,80 @@ function Get-CsvStats {
     return [pscustomobject]$out
 }
 
-function Set-InfoByLabel {
-    param([OfficeOpenXml.ExcelWorksheet]$Ws,[string]$Label,[string]$Value)
-    if (-not $Ws -or -not $Ws.Dimension) { return $false }
-    $rMax = [Math]::Min($Ws.Dimension.End.Row, 200)
-    for ($r=1; $r -le $rMax; $r++) {
-        $t = (($Ws.Cells[$r,1].Text) + '').Trim()
-        if ($t -eq $Label) {
-            $Ws.Cells[$r,2].Style.Numberformat.Format = '@'
-            $Ws.Cells[$r,2].Value = $Value
-            return $true
-        }
-    }
-    return $false
+# === Infinity SP (endast CSV, C/G från rad 10) – BEGIN PATCH ===
+
+if (-not (Get-Command Compress-SP10Strict -ErrorAction SilentlyContinue)) {
+    function Compress-SP10Strict {
+        param([int[]]$Points)
+        if (-not $Points -or $Points.Count -eq 0) { return '—' }
+        $uniq = $Points | Sort-Object -Unique
+
+        $segments = New-Object System.Collections.Generic.List[string]
+        $start = $uniq[0]; $prev = $uniq[0]; $count = 1
+        for ($i=1; $i -lt $uniq.Count; $i++) {
+            $curr = $uniq[$i]
+            if ($curr -eq ($prev + 1)) { $prev = $curr; $count++ }
+            else {
+                if ($count -ge 3) { $segments.Add(('SP{0:00}-{1:00}' -f $start, $prev)) }
+                elseif ($count -eq 2) { $segments.Add(('SP{0:00}' -f $start)); $segments.Add(('SP{0:00}' -f $prev)) }
+                else { $segments.Add(('SP{0:00}' -f $start)) }
+                $start 
+# (moved Get-InfinitySpFromCsvStrict to CSV HELPERS)
+{
+    Remove-Item Function:\Get-InfinitySpFromCsvStrict -ErrorAction SilentlyContinue
 }
+function Get-InfinitySpFromCsvStrict {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Alias('InfinitySerials')][string[]]$InstrumentSerials
+    )
+    $counts = @{}
+    $delim = Get-CsvDelimiterStrict -Path $Path
+    $sr = [System.IO.StreamReader]::new($Path,[System.Text.Encoding]::Default,$true)
+    try {
+        $lineNo = 0
+        while (($line = $sr.ReadLine()) -ne $null) {
+            if ($lineNo -lt $script:CSV_DATA_START_INDEX) { $lineNo++; continue }
+            if ([string]::IsNullOrWhiteSpace($line)) { $lineNo++; continue }
+            $fields = $line.Split($delim)
+            if ($fields.Length -le [Math]::Max($script:CSV_IDX_SAMPLE, $script:CSV_IDX_INSTR)) { $lineNo++; continue }
+            $instr  = $fields[$script:CSV_IDX_INSTR].Trim()
+            if ([string]::IsNullOrWhiteSpace($instr)) { $lineNo++; continue }
+            if (-not ($InstrumentSerials -contains $instr)) { $lineNo++; continue }
+            $sample = $fields[$script:CSV_IDX_SAMPLE]
+            if ([string]::IsNullOrWhiteSpace($sample)) { $lineNo++; continue }
+            $m = $script:ReSpMarker.Match($sample)
+            if ($m.Success) {
+                $n = 0
+                if ([int]::TryParse($m.Groups[1].Value, [ref]$n)) {
+                    if ($n -ge 0 -and $n -le 10) {
+                        if (-not $counts.ContainsKey($n)) { $counts[$n] = 0 }
+                        $counts[$n]++
+                    }
+                }
+            }
+            $lineNo++
+        }
+    } finally { $sr.Dispose() }
+    if ($counts.Count -eq 0) { return '—' }
+    $present = @(
+        $counts.GetEnumerator() | Where-Object { $_.Value -gt 0 } | ForEach-Object { [int]$_.Key } | Sort-Object
+    )
+    if ($present.Count -eq 0) { return '—' }
+    $parts = New-Object System.Collections.Generic.List[string]
+    $i = 0
+    while ($i -lt $present.Count) {
+        $start = $present[$i]; $end = $start
+        $j = $i + 1
+        while ($j -lt $present.Count -and $present[$j] -eq ($end + 1)) { $end = $present[$j]; $j++ }
+        if ($start -eq $end) { $parts.Add( ('#{0:00}' -f $start) ) } else { $parts.Add( ('#{0:00}-{1:00}' -f $start, $end) ) }
+        $i = $j
+    }
+    $total = ($counts.Values | Measure-Object -Sum).Sum
+    return ( ($parts -join '+') + (' x{0}' -f $total) )
+}
+
 
 # === Assay-mappning → Control-flik ===
 function Normalize-Assay { param([string]$s)
@@ -1060,7 +2023,7 @@ function Get-ControlTabName {
                 }
             }
             $mapPkg.Dispose()
-        } catch {}
+        } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     }
     return $null
 }
@@ -1093,11 +2056,9 @@ $MinitabMap = @(
     @{ Aliases=@('Xpert HIV-1 Qual XC PQC','Xpert HIV-1 Qual XC');  Macro=$null }
     @{ Aliases=@('Xpert HIV-1 Viral Load XC');                      Macro=$null }
     @{ Aliases=@('Xpert MTB-RIF JP IVD');                           Macro=$null }
-    @{ Aliases=@('Xpert MTB-XDR');                                  Macro=$null }
-    @{ Aliases=@('Xpert MRSA NxG');                                 Macro=$null }
-)
-$MinitabIndex = @{}
-foreach ($row in $MinitabMap) { foreach ($a in $row.Aliases) { $k = Normalize-Assay $a; if ($k -and -not $MinitabIndex.ContainsKey($k)) { $MinitabIndex[$k] = $row.Macro } } }
+    @{ Aliases=@('Xpert MTB-XDR')
+# (moved Get-MinitabMacro to CORE HELPERS)
+d -not $MinitabIndex.ContainsKey($k)) { $MinitabIndex[$k] = $row.Macro } } }
 function Get-MinitabMacro { param([string]$AssayName)
     if ([string]::IsNullOrWhiteSpace($AssayName)) { return $null }
     $k = Normalize-Assay $AssayName
@@ -1120,126 +2081,44 @@ function Find-ObservationCol { param($ws)
     return $default
 }
 
-if (-not (Get-Command Extract-WorksheetHeader -ErrorAction SilentlyContinue)) {
-    function Extract-WorksheetHeader {
-        param([OfficeOpenXml.ExcelPackage]$Pkg)
+if (-not (Get-Command Extract-WorksheetHeader_Robust -ErrorAction SilentlyContinue)) {
 
-        $result = [pscustomobject]@{
-            PartNo         = $null
-            BatchNo        = $null
-            CartridgeNo    = $null
-            DocumentNumber = $null
-            Attachment     = $null
-            Rev            = $null
-            Effective      = $null
-        }
-        if (-not $Pkg) { return $result }
+# (removed duplicate Extract-WorksheetHeader_Robust; using HEADER HELPERS version)
 
-        foreach ($ws in $Pkg.Workbook.Worksheets) {
-            if ($ws.Name -eq 'Worksheet Instructions') { continue }
-
-            # Platta till headertexter (ta bort CR/LF -> en rad)
-            $left  = (($ws.HeaderFooter.OddHeader.LeftAlignedText  + '') -replace '\r?\n',' ').Trim()
-            if (-not $left)  { $left  = (($ws.HeaderFooter.EvenHeader.LeftAlignedText  + '') -replace '\r?\n',' ').Trim() }
-            $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim()
-            if (-not $right) { $right = (($ws.HeaderFooter.EvenHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim() }
-
-            # --- HÖGER: Part / Batch / Cartridge ---
-            if (-not $result.PartNo)  {
-                if     ($right -match '(?i)\bPart\s*(?:No|Number)\.?:?\s*(\d{3}-\d{4})\b') { $result.PartNo  = $matches[1] }
-                elseif ($left  -match '(?i)\bPart\s*(?:No|Number)\.?:?\s*(\d{3}-\d{4})\b') { $result.PartNo  = $matches[1] } # fallback
-            }
-
-            if (-not $result.BatchNo) {
-                if     ($right -match '(?i)\bBatch\s*(?:No|Number)(?:\(s\))?\.?:?\s*(\d{10})\b') { $result.BatchNo = $matches[1] }
-                elseif ($left  -match '(?i)\bBatch\s*(?:No|Number)(?:\(s\))?\.?:?\s*(\d{10})\b') { $result.BatchNo = $matches[1] } # fallback
-            }
-
-            if (-not $result.CartridgeNo) {
-                # Hämta labelns värde, extrahera sedan ren 5-siffrig LSP
-                if ($right -match '(?i)\bCartridge\s*(?:No|Number)?(?:\s*\(LSP\))?\.?:?\s*([A-Za-z0-9\-\._\/ ]+)') {
-                    $tmp = $matches[1].Trim()
-                    $m = [regex]::Match($tmp,'(?<!\d)(\d{5})(?!\d)')
-                    if ($m.Success) { $result.CartridgeNo = $m.Groups[1].Value }
-                } elseif ($left -match '(?i)\bCartridge\s*(?:No|Number)?(?:\s*\(LSP\))?\.?:?\s*([A-Za-z0-9\-\._\/ ]+)') {
-                    $tmp = $matches[1].Trim()
-                    $m = [regex]::Match($tmp,'(?<!\d)(\d{5})(?!\d)')
-                    if ($m.Success) { $result.CartridgeNo = $m.Groups[1].Value }
-                }
-            }
-
-            # --- VÄNSTER: Document Number (Dxxxxx) + ev. "Attachment X" på nästa rad ---
-            if (-not $result.DocumentNumber) {
-                if     ($left  -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)(?:\s+Attachment\s+([A-Za-z0-9]+))?') {
-                    $result.DocumentNumber = $matches[1]
-                    if (-not $result.Attachment -and $matches[2]) { $result.Attachment = $matches[2] }
-                } elseif ($right -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)(?:\s+Attachment\s+([A-Za-z0-9]+))?') {
-                    $result.DocumentNumber = $matches[1]
-                    if (-not $result.Attachment -and $matches[2]) { $result.Attachment = $matches[2] }
-                }
-            }
-
-            # --- VÄNSTER: Rev / Effective (fallback: höger) ---
-            if (-not $result.Rev) {
-                if     ($left  -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
-                elseif ($right -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
-            }
-            if (-not $result.Effective) {
-                if     ($left  -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
-                elseif ($right -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
-            }
-
-            if ($result.PartNo -and $result.BatchNo -and $result.CartridgeNo -and
-                $result.DocumentNumber -and $result.Rev -and $result.Effective) { break }
-        }
-
-        # Rensa felaktig mallpunkt och gör sista fallbacken för LSP
-        if ($result.CartridgeNo -eq '.' -or $result.CartridgeNo -eq '') { $result.CartridgeNo = $null }
-        if (-not $result.CartridgeNo) {
-            foreach ($ws in $Pkg.Workbook.Worksheets) {
-                if ($ws.Name -eq 'Worksheet Instructions') { continue }
-                $left  = (($ws.HeaderFooter.OddHeader.LeftAlignedText  + '') -replace '\r?\n',' ').Trim()
-                $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim()
-                $m  = [regex]::Match($left,  '(?<!\d)(\d{5})(?!\d)')
-                $m2 = if (-not $m.Success) { [regex]::Match($right,'(?<!\d)(\d{5})(?!\d)') } else { $null }
-                if ($m.Success) { $result.CartridgeNo = $m.Groups[1].Value; break }
-                if ($m2 -and $m2.Success) { $result.CartridgeNo = $m2.Groups[1].Value; break }
-            }
-        }
-        return $result
-    }
 }
 
-if (-not (Get-Command Extract-SealTestHeader -ErrorAction SilentlyContinue)) {
-    function Extract-SealTestHeader {
-        param([OfficeOpenXml.ExcelPackage]$Pkg)
+if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)) {
 
-        $result = [pscustomobject]@{ DocumentNumber=$null; Rev=$null; Effective=$null }
-        if (-not $Pkg) { return $result }
+# (removed duplicate Get-WorksheetHeaderPerSheet; using HEADER HELPERS version)
 
-        foreach ($ws in $Pkg.Workbook.Worksheets) {
-            if ($ws.Name -eq 'Worksheet Instructions') { continue }
-            $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim()
-            if (-not $right) { $right = (($ws.HeaderFooter.EvenHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim() }
-
-            if (-not $result.DocumentNumber -and $right -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)\b') { $result.DocumentNumber = $matches[1] }
-            if (-not $result.Rev            -and $right -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
-            if (-not $result.Effective      -and $right -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
-
-            if ($result.DocumentNumber -and $result.Rev -and $result.Effective) { break }
-        }
-        return $result
-    }
 }
 
-function Normalize-Id {
-    param([string]$Value, [ValidateSet('Batch','Part','Cartridge')] [string]$Type)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-    $v = $Value.Trim()
-    switch ($Type) {
-        'Batch'     { return ($v -replace '[^\d]', '') }                      # 10 siffror
-        'Part'      { return (($v -replace '[^0-9A-Za-z\-]', '')).ToUpper() } # t.ex. 700-5702
-        'Cartridge' { return ($v -replace '[^\d]', '') }                      # 5 siffror
+if (-not (Get-Command Compare-WorksheetHeaderSet_Robust -ErrorAction SilentlyContinue)) {
+    function Compare-WorksheetHeaderSet_Robust {
+        param([Parameter(Mandatory)][object[]]$Rows)
+
+        $devIssues  = 0
+        $reqIssues  = 0
+        $detailsLst = New-Object System.Collections.Generic.List[string]
+
+        function _canon([string]$raw, [string]$type) {
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+            $txt = $raw.Trim()
+            switch ($type) {
+                'Part'      { $m=[regex]::Match($txt,'(?i)\b(\d{3}-\d{4})\b'); return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Batch'     { $m=[regex]::Match($txt,'(?<!\d)(\d{10})(?!\d)');  return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Cartridge' { $m=[regex]::Match($txt,'(?<!\d)(\d{5})(?!\d)');   return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Doc'       { $m=[regex]::Match($txt,'(?i)\b(D\d+)\b');         return $(if($m.Success){$m.Groups[1].Value.ToUpper()}else{$txt.ToUpper()}) }
+                'REV'       { return $txt.ToUpper() }
+                'EFF' {
+                    $pats=@('yyyy-MM-dd','yyyy/MM/dd','dd-MM-yyyy','dd/MM/yyyy','MM-dd-yyyy','MM/dd/yyyy')
+                    foreach($p in $pats){try {return([datetime]::ParseExact($txt,$p,$null)).ToString('yyyy-MM-dd')} catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }}
+                    try {return([datetime]::Parse($txt)).ToString('yyyy-MM-dd')} catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                    return $txt
+                }
+                default     { return $txt }
+# (moved Get-ConsensusValue to HEADER HELPERS)
+) }                      # 5 siffror
         default     { return $v }
     }
 }
@@ -1413,21 +2292,15 @@ if (-not (Get-Command Write-HeaderReport -ErrorAction SilentlyContinue)) {
 
         try {
             if ($Sheet.Dimension) { $Sheet.Cells[$Sheet.Dimension.Address].AutoFitColumns() | Out-Null }
-        } catch {}
+        } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     }
 }
 
 # === GUI-utils: CheckedListBox ===
 function Add-CLBItems {
-    param([System.Windows.Forms.CheckedListBox]$clb,[System.IO.FileInfo[]]$files,[switch]$AutoCheckFirst)
-    $clb.BeginUpdate()
-    $clb.Items.Clear()
-    foreach($f in $files){
-        if ($f -isnot [System.IO.FileInfo]) { try { $f = Get-Item -LiteralPath $f } catch { continue } }
-        [void]$clb.Items.Add($f, $false)
-    }
-    $clb.EndUpdate()
-    if ($AutoCheckFirst -and $clb.Items.Count -gt 0) { $clb.SetItemChecked(0,$true) }
+    param([System.Windows.Forms.CheckedListBox]$clb,[System.IO.FileInfo[]]$files,[switch]$AutoChec
+# (moved Get-CheckedFilePath to CORE HELPERS)
+$clb.Items.Count -gt 0) { $clb.SetItemChecked(0,$true) }
     Update-StatusBar
 }
 
@@ -1618,7 +2491,7 @@ Snabbguide
 2. Välj fil:
    • 1x CSV
    • 1x Seal Test NEG
-   • 1x Seal Test NEG
+   • 1x Seal Test POS
    • 1x Worksheet
 
 3. Välj Rapport-utdata:
@@ -1629,9 +2502,10 @@ Snabbguide
 4. Klicka på "Skapa rapport"
 
 Excelrapport öppnas med följande flikar beroende på valda filer:
-   • Seal Test Info
-   • STF Sum Equipment
    • Information
+   • Seal Test Info
+   • STF Sum
+   • Equipment
    • Control Material
    • SharePoint Info
 
@@ -1680,11 +2554,6 @@ hämtar utrustningslista och rätt kontrollmaterial för sökt LSP.
    • Signatur hamnar på alla flikar med:
      - "Seal Test Data" och "Name of Tester"
    • Flikar utan data, signatur eller/och markerade som N/A hoppas över.
-
-7) Mismatch i signaturer – vad betyder det? (Granskning)
-   • Skriptet jämför namn mellan NEG och POS.
-   • Om signaturer skiljer sig → “Mismatch”.
-   • Lista över blad med avvikelser skrivs under huvudraden.
 
 "@
     [System.Windows.Forms.MessageBox]::Show($faq,"Vanliga frågor") | Out-Null
@@ -1735,25 +2604,13 @@ $miHelpDlg.add_Click({
 })
 
 # Om
-$miOm.add_Click({ [System.Windows.Forms.MessageBox]::Show("BETA $ScriptVersion`nav Jesper","Om") | Out-Null })
+$miOm.add_Click({ [System.Windows.Forms.MessageBox]::Show("OBS! Detta verktyg är endast ett hjälpmedel och ersätter inte någon process hos PQC.`n BETA $ScriptVersion`nav Jesper","Om") | Out-Null })
 
 # === Signaturhjälp ===
 function Get-DataSheets { param([OfficeOpenXml.ExcelPackage]$Pkg)
-    $all = @($Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne "Worksheet Instructions" })
-    if ($all.Count -gt 1) { return $all | Select-Object -Skip 1 } else { return @() }
-}
-
-function Test-SignatureFormat {
-    param([string]$Text)
-    $raw = ($Text + '')
-    $trim = $raw.Trim()
-    $parts = $trim -split '\s*,\s*'
-    $name = if ($parts.Count -ge 1) { $parts[0] } else { '' }
-    $sign = if ($parts.Count -ge 2) { $parts[1] } else { '' }
-    $date = if ($parts.Count -ge 3) { $parts[2] } else { '' }
-    $dateOk = $false
-    if ($date) { if ($date -match '^\d{4}-\d{2}-\d{2}$' -or $date -match '^\d{8}$') { $dateOk = $true } }
-    [pscustomobject]@{ Raw=$raw; Name=$name; Sign=$sign; Date=$date; Parts=$parts.Count; DateOk=$dateOk; LooksOk=($name -ne '' -and $sign -ne '') }
+    $all = @($Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne "Work
+# (moved Confirm-SignatureInput to CORE HELPERS)
+; Parts=$parts.Count; DateOk=$dateOk; LooksOk=($name -ne '' -and $sign -ne '') }
 }
 function Confirm-SignatureInput { param([string]$Text)
     $info = Test-SignatureFormat $Text
@@ -1818,7 +2675,6 @@ function Get-SignatureSetForDataSheets {
     return $result
 }
 
-# === NYTT: SharePoint-batchlänkshjälp ===
 function UrlEncode([string]$s){ try { [System.Uri]::EscapeDataString($s) } catch { $s } }
 
 function Get-BatchNumberFromSealFile([string]$Path){
@@ -1831,7 +2687,7 @@ function Get-BatchNumberFromSealFile([string]$Path){
             $txt = ($ws.Cells['D2'].Text + '').Trim()   # "Batch Number"
             if ($txt) { return $txt }
         }
-    } catch {} finally { if ($pkg) { try { $pkg.Dispose() } catch {} } }
+    } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } finally { if ($pkg) { try { $pkg.Dispose() } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } } }
     return $null
 }
 function Update-BatchLink {
@@ -1887,6 +2743,8 @@ function Get-SignatureList {
 
 # === Sök filer-knapp ===
 $btnScan.Add_Click({
+    Gui-Log '🔎 Söker filer…' -Immediate
+    try {
     $lsp = $txtLSP.Text.Trim()
     if (-not $lsp) { Gui-Log "⚠️ Ange ett LSP-nummer" 'Warn'; return }
 
@@ -1920,6 +2778,10 @@ $btnScan.Add_Click({
     if ($candLsp.Count -eq 0) { Gui-Log "ℹ️ Ingen LSP Worksheet hittad." 'Info' }
     Update-BuildEnabled
     Update-BatchLink   # NYTT
+    } finally {
+        # valfritt
+        Gui-Log '✅ Filer laddade'
+    }
 })
 
 # === Bläddra-knappar ===
@@ -2023,7 +2885,7 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
             $rng.Style.Border.Right.Style  = "Thin"
             $rng.Style.Border.BorderAround("Medium")
 
-            try { $rng.AutoFitColumns() | Out-Null } catch {}
+            try { $rng.AutoFitColumns() | Out-Null } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
         }
         else {
             # --- Tabell-layout (kolumnrubriker som "Work Center", "Order#", ...) ---
@@ -2049,7 +2911,7 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
                     $maxR = [Math]::Min($ws.Dimension.End.Row, 2000)
                     $ws.Cells[$ws.Dimension.Start.Row,$ws.Dimension.Start.Column,$maxR,$ws.Dimension.End.Column].AutoFitColumns() | Out-Null
                 }
-            } catch {}
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
         }
 
         # Låt flikens ordning bestämmas i rapportlogiken istället för att tvinga första position här.
@@ -2088,7 +2950,22 @@ if (-not (Get-Command Write-ListToColumn -ErrorAction SilentlyContinue)) {
 # ===== RAPPORTLOGIK =========
 # ============================
 
+#endregion [CHAPTER] CORE HELPERS
+
+#region [CHAPTER] UI/WINFORMS#region [UI] LAYOUT
+
+
+#endregion [UI] LAYOUT
+
+#region [UI] EVENT WIRE-UP
+# (no explicit UI event wire-up lines in this chapter)
+#endregion [UI] EVENT WIRE-UP
+#endregion [CHAPTER] UI/WINFORMS
+#region [CHAPTER] EVENT HANDLERS
+
 $btnBuild.Add_Click({
+    Gui-Log 'Skapar rapport…' -Immediate
+    try {
     # --- EPPlus obligatoriskt ---
     if (-not (Load-EPPlus)) { Gui-Log "❌ EPPlus kunde inte laddas – avbryter." 'Error'; return }
 
@@ -2124,8 +3001,8 @@ $btnBuild.Add_Click({
             return
         }
 
-        $templatePath = Join-Path $PSScriptRoot "output_template-v3.xlsx"
-        if (-not (Test-Path -LiteralPath $templatePath)) { Gui-Log "❌ Mallfilen 'output_template-v2.xlsx' saknas!" 'Error'; return }
+        $templatePath = Join-Path $PSScriptRoot "output_template-v4.xlsx"
+        if (-not (Test-Path -LiteralPath $templatePath)) { Gui-Log "❌ Mallfilen 'output_template-v4.xlsx' saknas!" 'Error'; return }
         try {
             $pkgOut = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($templatePath))
         } catch {
@@ -2133,9 +3010,11 @@ $btnBuild.Add_Click({
             return
         }
 
+#region [FLOW] SIGNATUR I NEG/POS
         # ============================
         # === SIGNATUR I NEG/POS  ====
         # ============================
+
         $signToWrite = ($txtSigner.Text + '').Trim()
         if ($chkWriteSign.Checked) {
             if (-not $signToWrite) { Gui-Log "❌ Ingen signatur angiven (B47). Avbryter."; return }
@@ -2182,22 +3061,30 @@ $btnBuild.Add_Click({
             }
         }
 
+
+#endregion [FLOW]
+#region [FLOW] CSV (Info/Control)
         # ============================
         # === CSV (Info/Control)  ====
         # ============================
+
         $csvRows = @(); $runAssay = $null
         if ($selCsv) {
-            try { $csvRows = Import-CsvRows -Path $selCsv -StartRow 10 } catch {}
-            try { $runAssay = Get-AssayFromCsv -Path $selCsv -StartRow 10 } catch {}
+            try { $csvRows = Import-CsvRows -Path $selCsv -StartRow 10 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+            try { $runAssay = Get-AssayFromCsv -Path $selCsv -StartRow 10 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             if ($runAssay) { Gui-Log "🔎 Assay från CSV: $runAssay" }
         }
         $controlTab = $null
         if ($runAssay) { $controlTab = Get-ControlTabName -AssayName $runAssay }
         if ($controlTab) { Gui-Log "🧪 Control Material-flik: $controlTab" } else { Gui-Log "ℹ️ Ingen control-mappning (fortsätter utan)." }
 
+
+#endregion [FLOW]
+#region [FLOW] Läs avvikelser
         # ============================
         # === Läs avvikelser       ===
         # ============================
+
         # Läs avvikelser från varje data‑blad i Seal Test NEG/POS. Detta läser in våtförluster
         # och detekterar fail eller minusvärde när Weight Loss (kolumn K) är ≤ -2.4 eller text i L
         # indikerar “FAIL”.
@@ -2248,16 +3135,20 @@ $btnBuild.Add_Click({
             }
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Seal Test Info (blad)
         # ============================
         # === Seal Test Info (blad) ==
         # ============================
+
         $wsOut1 = $pkgOut.Workbook.Worksheets["Seal Test Info"]
         if (-not $wsOut1) { Gui-Log "❌ Fliken 'Seal Test Info' saknas i mallen"; return }
 
         # Rensa mismatch-kolumn (D3..D15)
         for ($row = 3; $row -le 15; $row++) {
             $wsOut1.Cells["D$row"].Value = $null
-            try { $wsOut1.Cells["D$row"].Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::None } catch {}
+            try { $wsOut1.Cells["D$row"].Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::None } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
         }
 
         $fields = @(
@@ -2308,9 +3199,13 @@ $btnBuild.Add_Click({
             $row++
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Testare (B43)
         # ============================
         # === Testare (B43)        ===
         # ============================
+
         $testersNeg = @(); $testersPos = @()
         foreach ($s in $pkgNeg.Workbook.Worksheets | Where-Object { $_.Name -ne "Worksheet Instructions" }) { $t=$s.Cells["B43"].Text; if ($t) { $testersNeg += ($t -split ",") } }
         foreach ($s in $pkgPos.Workbook.Worksheets | Where-Object { $_.Name -ne "Worksheet Instructions" }) { $t=$s.Cells["B43"].Text; if ($t) { $testersPos += ($t -split ",") } }
@@ -2349,9 +3244,13 @@ $btnBuild.Add_Click({
             }
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Signatur-jämförelse
         # ============================
         # === Signatur-jämförelse  ===
         # ============================
+
         $negSigSet = Get-SignatureSetForDataSheets -Pkg $pkgNeg
         $posSigSet = Get-SignatureSetForDataSheets -Pkg $pkgPos
 
@@ -2388,24 +3287,9 @@ $btnBuild.Add_Click({
         }
 
         # Infoga signaturinfo (rad 32)
-        function Set-MergedWrapAutoHeight {
-            param([OfficeOpenXml.ExcelWorksheet]$Sheet,[int]$RowIndex,[int]$ColStart=2,[int]$ColEnd=3,[string]$Text)
-            $rng = $Sheet.Cells[$RowIndex, $ColStart, $RowIndex, $ColEnd]
-            $rng.Style.WrapText = $true
-            $rng.Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::None
-            $Sheet.Row($RowIndex).CustomHeight = $false
-            try {
-                $wChars = [Math]::Floor(($Sheet.Column($ColStart).Width + $Sheet.Column($ColEnd).Width) - 2); if ($wChars -lt 1) { $wChars = 1 }
-                $segments = $Text -split "(\r\n|\n|\r)"; $lineCount = 0
-                foreach ($seg in $segments) { if (-not $seg) { $lineCount++ } else { $lineCount += [Math]::Ceiling($seg.Length / $wChars) } }
-                if ($lineCount -lt 1) { $lineCount = 1 }
-                $targetHeight = [Math]::Max(15, [Math]::Ceiling(15 * $lineCount * 2.15))
-                if ($Sheet.Row($RowIndex).Height -lt $targetHeight) {
-                    $Sheet.Row($RowIndex).Height = $targetHeight
-                    $Sheet.Row($RowIndex).CustomHeight = $true
-                }
-            } catch { $Sheet.Row($RowIndex).CustomHeight = $false }
-        }
+        
+# (moved function to top-level: lifted for readability)
+
 
         # Justera radnumret för signatursektionen dynamiskt.
         # I mallen finns en tom rad mellan den sista testaren och raden med texten
@@ -2427,8 +3311,8 @@ $btnBuild.Add_Click({
             Style-Cell $cell $false 'CCFFFF' 'Medium' $null
             $cell.Style.HorizontalAlignment = 'Center'
         }
-        try { $wsOut1.Column(2).Width = 40; $wsOut1.Column(3).Width = 40 } catch {}
-        try { $wsOut1.Column(4).Width = 10 } catch {}
+        try { $wsOut1.Column(2).Width = 40; $wsOut1.Column(3).Width = 40 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+        try { $wsOut1.Column(4).Width = 10 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
         if ($sigMismatch) {
             $mismatchCell = $wsOut1.Cells["D$signRow"]
@@ -2437,7 +3321,7 @@ $btnBuild.Add_Click({
             if ($mismatchSheets.Count -gt 0) {
                 for ($j = 0; $j -lt $mismatchSheets.Count; $j++) {
                     $rowIdx = $signRow + 1 + $j
-                    try { $wsOut1.Cells["B$rowIdx:C$rowIdx"].Merge = $true } catch {}
+                    try { $wsOut1.Cells["B$rowIdx:C$rowIdx"].Merge = $true } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                     $text = $mismatchSheets[$j]
                     $wsOut1.Cells["B$rowIdx"].Value = $text
                     foreach ($mc in $wsOut1.Cells["B$rowIdx:C$rowIdx"]) { Style-Cell $mc $false 'CCFFFF' 'Medium' $null }
@@ -2449,9 +3333,13 @@ $btnBuild.Add_Click({
             }
         }
 
+
+#endregion [FLOW]
+#region [FLOW] STF Sum
         # ============================
         # === STF Sum               ===
         # ============================
+
         $wsOut2 = $pkgOut.Workbook.Worksheets["STF Sum"]
         if (-not $wsOut2) { Gui-Log "❌ Fliken 'STF Sum' saknas i mallen!"; return }
 
@@ -2465,7 +3353,7 @@ $btnBuild.Add_Click({
             $wsOut2.Cells["A1"].Style.HorizontalAlignment = "Left"
             if ($wsOut2.Dimension -and $wsOut2.Dimension.End.Row -gt 1) { $wsOut2.DeleteRow(2, $wsOut2.Dimension.End.Row - 1) }
         } else {
-            Gui-Log "❗ $failNegCount FAIL i NEG, $failPosCount i POS"
+            Gui-Log "❗ $failNegCount avvikelser i NEG, $failPosCount i POS"
 
             $oldDataRows = 0
             if ($wsOut2.Dimension) { $oldDataRows = $wsOut2.Dimension.End.Row - 1; if ($oldDataRows -lt 0) { $oldDataRows = 0 } }
@@ -2530,171 +3418,281 @@ $btnBuild.Add_Click({
 
             $wsOut2.Cells.Style.WrapText = $false
             $wsOut2.Cells["A1"].Style.HorizontalAlignment = "Left"
-            try { $wsOut2.Cells[2,6,([Math]::Max($currentRow-1,2)),6].Style.Numberformat.Format = '0.0' } catch {}
+            try { $wsOut2.Cells[2,6,([Math]::Max($currentRow-1,2)),6].Style.Numberformat.Format = '0.0' } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             if ($wsOut2.Dimension) { $wsOut2.Cells[$wsOut2.Dimension.Address].AutoFitColumns() }
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Information-blad
 # ============================
 # === Information-blad     ===
 # ============================
+
 try {
     # -- Helpers (definieras en gång per session om de saknas) --
     if (-not (Get-Command Add-Hyperlink -ErrorAction SilentlyContinue)) {
-        function Add-Hyperlink {
-            param([OfficeOpenXml.ExcelRange]$Cell,[string]$Text,[string]$Url)
-            try {
-                $Cell.Value = $Text
-                $Cell.Hyperlink = [Uri]$Url
-                $Cell.Style.Font.UnderLine = $true
-                $Cell.Style.Font.Color.SetColor([System.Drawing.Color]::FromArgb(0,102,204))
-            } catch {}
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
     if (-not (Get-Command Find-RegexCell -ErrorAction SilentlyContinue)) {
-        function Find-RegexCell {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[regex]$Rx,[int]$MaxRows=200,[int]$MaxCols=40)
-            if (-not $Ws -or -not $Ws.Dimension) { return $null }
-            $rMax = [Math]::Min($Ws.Dimension.End.Row, $MaxRows)
-            $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
-            for ($r=1; $r -le $rMax; $r++) {
-                for ($c=1; $c -le $cMax; $c++) {
-                    $t = ($Ws.Cells[$r,$c].Text + '').Trim()
-                    if ($t -and $Rx.IsMatch($t)) { return @{Row=$r;Col=$c;Text=$t} }
-                }
-            }
-            return $null
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
     if (-not (Get-Command Find-ExactLabelRightOf -ErrorAction SilentlyContinue)) {
-        function Find-ExactLabelRightOf {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string]$Label,[int]$MaxRows=200,[int]$MaxCols=40)
-            if (-not $Ws -or -not $Ws.Dimension) { return $null }
-            $rx = [regex]::new('(?i)^\s*' + [regex]::Escape($Label) + '\s*$')
-            $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
-            if ($hit -and $hit.Col -lt [Math]::Min($Ws.Dimension.End.Column, $MaxCols)) {
-                return ($Ws.Cells[$hit.Row, $hit.Col+1].Text + '').Trim()
-            }
-            return $null
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
     if (-not (Get-Command Find-HeaderRowCols -ErrorAction SilentlyContinue)) {
-        function Find-HeaderRowCols {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string[]]$Need,[int]$ScanRows=80,[int]$MaxCols=40)
-            if (-not $Ws -or -not $Ws.Dimension) { return $null }
-            $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
-            for ($r=1; $r -le [Math]::Min($Ws.Dimension.End.Row, $ScanRows); $r++) {
-                $map=@{}; $found=0
-                for ($c=1; $c -le $cMax; $c++) {
-                    $h = (($Ws.Cells[$r,$c].Text) + '').Trim()
-                    if (-not $h) { continue }
-                    foreach ($n in $Need) {
-                        if ($map.ContainsKey($n)) { continue }
-                        if ($h -match ('(?i)^\s*' + [regex]::Escape($n) + '\s*$')) { $map[$n]=$c; $found++ }
-                    }
-                }
-                if ($found -eq $Need.Count) { return @{Row=$r;Map=$map} }
-            }
-            return $null
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
     if (-not (Get-Command Normalize-DateString -ErrorAction SilentlyContinue)) {
-        function Normalize-DateString {
-            param([object]$Val)
-            if ($Val -is [datetime]) { return ([datetime]$Val).ToString('yyyy-MM-dd') }
-            $t = ($Val + '').Trim()
-            if (-not $t) { return $null }
-            $m = [regex]::Match($t, '\b\d{4}[- ]?\d{2}[- ]?\d{2}\b')
-            if ($m.Success) {
-                $s = $m.Value.Replace(' ','-')
-                try { return ([datetime]::Parse($s)).ToString('yyyy-MM-dd') } catch { return $s }
-            }
-            try { return ([datetime]::Parse($t)).ToString('yyyy-MM-dd') } catch { return $null }
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
     if (-not (Get-Command Get-SealHeaderDocInfo -ErrorAction SilentlyContinue)) {
-        function Get-SealHeaderDocInfo {
-            param([OfficeOpenXml.ExcelPackage]$Pkg)
-            $result = [pscustomobject]@{ Raw=''; DocNo=''; Rev='' }
-            if (-not $Pkg) { return $result }
-            $ws = $Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
-            if (-not $ws) { return $result }
-            try {
-                $lt = ($ws.HeaderFooter.OddHeader.LeftAlignedText + '').Trim()
-                if (-not $lt) { $lt = ($ws.HeaderFooter.EvenHeader.LeftAlignedText + '').Trim() }
-                $result.Raw = $lt
-                $rx = [regex]'(?i)(?:document\s*(?:no|nr|#|number)\s*[:#]?\s*([A-Z0-9\-_\.\/]+))?.*?(?:rev(?:ision)?\.?\s*[:#]?\s*([A-Z0-9\-_\.]+))?'
-                $m = $rx.Match($lt)
-                if ($m.Success) {
-                    if ($m.Groups[1].Value) { $result.DocNo = $m.Groups[1].Value.Trim() }
-                    if ($m.Groups[2].Value) { $result.Rev   = $m.Groups[2].Value.Trim() }
-                }
-            } catch {}
-            return $result
-        }
+        
+# (moved function to top-level: lifted for readability)
+
     }
 
     # -- Förbered fliken "Information" --
-    # Använd befintligt blad "Information" från mallen i paketet $pkgOut. Eftersom mallen redan har
-    # Information som första blad behöver det inte raderas och skapas om. Om bladet mot förmodan
-    # saknas i mallen skapas ett nytt blad.
     $wsInfo = $pkgOut.Workbook.Worksheets['Information']
     if (-not $wsInfo) {
         $wsInfo = $pkgOut.Workbook.Worksheets.Add('Information')
     }
     # Säkerställ teckensnitt för konsekvent utseende
-    try { $wsInfo.Cells.Style.Font.Name='Arial'; $wsInfo.Cells.Style.Font.Size=11 } catch {}
+    try { $wsInfo.Cells.Style.Font.Name='Arial'; $wsInfo.Cells.Style.Font.Size=11 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
-# --- WS Data-flikar: replikerade namn är avaktiverade ---
-try {
-    # Eftersom extraktionen av replikerade namn från Worksheet har tagits bort,
-    # skrivs tomma listor till kolumnerna C–F.
-    Write-ListToColumn -Ws $wsInfo -ColumnLetter 'C' -StartRow 8 -Items @()
-    Write-ListToColumn -Ws $wsInfo -ColumnLetter 'D' -StartRow 8 -Items @()
-    Write-ListToColumn -Ws $wsInfo -ColumnLetter 'E' -StartRow 8 -Items @()
-    Write-ListToColumn -Ws $wsInfo -ColumnLetter 'F' -StartRow 8 -Items @()
-} catch {
-    Gui-Log ("⚠️ WS Data-flikar (V/M/S/B) fel: " + $_.Exception.Message) 'Warn'
-}
     
-# --- CSV-statistik till nya rader i Information (A8..A11 -> B8..B11) ----
-try {
-    $csvStats = $null
-    if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
-        $csvStats = Get-CsvStats -Path $selCsv
-    } else {
-        $csvStats = [pscustomobject]@{
-            TestCount=0; DupCount=0; Duplicates=@(); LspValues=@(); LspOK=$null; InstrumentByType=[ordered]@{}
+    # --- CSV-statistik och info till nya rader i Information (CSV-Info) ---
+    try {
+        # Läs CSV-statistik
+        $csvStats = $null
+        if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
+            $csvStats = Get-CsvStats -Path $selCsv
+        } else {
+            $csvStats = [pscustomobject]@{
+                TestCount    = 0
+                DupCount     = 0
+                Duplicates   = @()
+                LspValues    = @()
+                LspOK        = $null
+                InstrumentByType = [ordered]@{}
+            }
+            }
+
+# --- Bygg Infinity-serialslistan ---
+$infSN = @()
+if ($script:GXINF_Map) {
+    foreach ($k in $script:GXINF_Map.Keys) {
+        if ($k -like 'Infinity-*') {
+            $infSN += ($script:GXINF_Map[$k].Split(',') | ForEach-Object { ($_ + '').Trim() } | Where-Object { $_ })
         }
     }
+}
+$infSN = $infSN | Select-Object -Unique
 
-    # B8: Test Count
-    $null = Set-InfoByLabel -Ws $wsInfo -Label 'Test Count' -Value ($csvStats.TestCount.ToString())
-
-    # B9: Duplicate Cartridge S/N
-    $dupText = if ($csvStats.DupCount -gt 0) {
-        # visa max 8 st i parentes för läsbarhet
-        $show = ($csvStats.Duplicates | Select-Object -First 8) -join ', '
-        "$($csvStats.DupCount) ($show)"
-    } else { 'Inga dubletter funna' }
-    $null = Set-InfoByLabel -Ws $wsInfo -Label 'Dublett Cartridge S/N' -Value $dupText
-
-    # B10: LSP from CSV
-    $lspText = if ($csvStats.LspValues.Count -gt 0) {
-        $csvStats.LspValues -join ', '
-    } else { '' }
-    $null = Set-InfoByLabel -Ws $wsInfo -Label 'LSP från CSV' -Value $lspText
-
-    # B11: Instrument Usage
-    $instText = if ($csvStats.InstrumentByType.Keys.Count -gt 0) {
-        ($csvStats.InstrumentByType.GetEnumerator() | ForEach-Object { "$($_.Key)" } | Sort-Object) -join '; '
-    } else { '' }
-    $null = Set-InfoByLabel -Ws $wsInfo -Label 'Använda INF/GX' -Value $instText
-
+# --- Räkna SP för Infinity från CSV ---
+$infSummary = '—'
+try {
+    if ($selCsv -and (Test-Path -LiteralPath $selCsv) -and $infSN.Count -gt 0) {
+        $infSummary = Get-InfinitySpFromCsvStrict -Path $selCsv -InfinitySerials $infSN
+    }
 } catch {
-    Gui-Log ("⚠️ CSV data-fel: " + $_.Exception.Message) 'Warn'
+    Gui-Log ("Infinity SP fel: " + $_.Exception.Message) 'Warn'
 }
 
+# Beräkna dubbletter för Sample ID (rad 11)
+        $dupSampleCount = 0
+        $dupSampleList  = @()
+        if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
+            try {
+                $csvLines = Get-Content -LiteralPath $selCsv
+                if ($csvLines.Count -gt 8) {
+                    $headerFields = ConvertTo-CsvFields $csvLines[7]
+                    $sampleIdx = -1
+                    for ($i=0; $i -lt $headerFields.Count; $i++) {
+                        $hf = ($headerFields[$i] + '').Trim().ToLower()
+                        if ($hf -match 'sample') { $sampleIdx = $i; break }
+                    }
+                    if ($sampleIdx -ge 0) {
+                        $samples = @()
+                        for ($r=9; $r -lt $csvLines.Count; $r++) {
+                            $line = $csvLines[$r]
+                            if (-not $line -or -not $line.Trim()) { continue }
+                            $fields = ConvertTo-CsvFields $line
+                            if ($fields.Count -gt $sampleIdx) {
+                                $val = ($fields[$sampleIdx] + '').Trim()
+                                if ($val) { $samples += $val }
+                            }
+                        }
+                        if ($samples.Count -gt 0) {
+                            $counts = @{}
+                            foreach ($s in $samples) { if (-not $counts.ContainsKey($s)) { $counts[$s] = 0 }; $counts[$s]++ }
+                            $dupList = @()
+                            foreach ($entry in $counts.GetEnumerator()) {
+                                if ($entry.Value -gt 1) {
+                                    # Kombinera värde och antal, t.ex. "12345 x2"
+                                    $dupList += ("$($entry.Key) x$($entry.Value)")
+                                }
+                            }
+                            $dupSampleCount = $dupList.Count
+                            $dupSampleList  = $dupList
+                        }
+                    }
+                }
+            } catch {
+                Gui-Log ("⚠️ Fel vid analys av Sample ID: " + $_.Exception.Message) 'Warn'
+            }
+        }
+        $dupSampleText = if ($dupSampleCount -gt 0) {
+            $show = ($dupSampleList | Select-Object -First 8) -join ', '
+            "$dupSampleCount ($show)"
+        } else { 'N/A' }
 
+        # Beräkna dubbletter för Cartridge S/N (rad 12)
+        $dupCartText = if ($csvStats.DupCount -gt 0) {
+            $show = ($csvStats.Duplicates | Select-Object -First 8) -join ', '
+            "$($csvStats.DupCount) ($show)"
+        } else { 'N/A' }
+
+        # ----- LSP från CSV (rad 9) -----
+        # Sammanställ unika LSP-nummer från CSV och deras antal. Om inga hittas lämnas
+        # $lspSummary tomt så att GUI-värdet används istället längre ned.
+        $lspSummary = ''
+        try {
+            if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
+                $csvLines2 = Get-Content -LiteralPath $selCsv
+                if ($csvLines2.Count -gt 8) {
+                    $counts = @{}
+                    for ($rr = 9; $rr -lt $csvLines2.Count; $rr++) {
+                        $ln = $csvLines2[$rr]
+                        if (-not $ln -or -not $ln.Trim()) { continue }
+                        $fs = ConvertTo-CsvFields $ln
+                        if ($fs.Count -gt 4) {
+                            $raw = ($fs[4] + '').Trim()
+                            if ($raw) {
+                                # Extrahera femsiffrigt nummer om möjligt, annars använd råtalet
+                                $mLsp = [regex]::Match($raw,'(\\d{5})')
+                                $code = if ($mLsp.Success) { $mLsp.Groups[1].Value } else { $raw }
+                                if (-not $counts.ContainsKey($code)) { $counts[$code] = 0 }
+                                $counts[$code]++
+                            }
+                        }
+                    }
+if ($counts.Count -gt 0) {
+    $sorted = $counts.GetEnumerator() | Sort-Object Key
+
+    $lspSummaryParts = @()
+    foreach ($kvp in $sorted) {
+        $part = if ($kvp.Value -gt 1) { "$($kvp.Key) x$($kvp.Value)" } else { $kvp.Key }
+        $lspSummaryParts += $part
+    }
+
+    $total = $sorted.Count
+
+    if ($total -eq 1) {
+        $lspSummary = $sorted[0].Key
+    }
+    else {
+        $lspSummary = "$total (" + ($lspSummaryParts -join ', ') + ")"
+    }
+}
+                        }
+                    }
+
+        } catch {
+            Gui-Log ("⚠️ Fel vid extraktion av LSP från CSV: " + $_.Exception.Message) 'Warn'
+            $lspSummary = ''
+        }
+        
+        $instText = if ($csvStats.InstrumentByType.Keys.Count -gt 0) {
+            ($csvStats.InstrumentByType.GetEnumerator() | ForEach-Object { "$($_.Key)" } | Sort-Object) -join '; '
+        } else { '' }
+
+        
+# (moved function to top-level: lifted for readability)
+
+
+        $isNewLayout = $true
+        try {
+            $tmpRow = Find-InfoRow -Ws $wsInfo -Label 'CSV-Info'
+            if ($tmpRow) { $isNewLayout = $true }
+        } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+
+        $rowCsvFile    = Find-InfoRow -Ws $wsInfo -Label 'CSV'
+        $rowLsp        = Find-InfoRow -Ws $wsInfo -Label 'LSP'
+        $rowAntal      = Find-InfoRow -Ws $wsInfo -Label 'Antal tester'
+        # Sample ID kan förekomma endast i nya layouten
+        $rowDupSample  = Find-InfoRow -Ws $wsInfo -Label 'Dubblett Sample ID'
+        if (-not $rowDupSample) { $rowDupSample = Find-InfoRow -Ws $wsInfo -Label 'Dublett Sample ID' }
+        # Cartridge S/N – namnet kan stavas med ett eller två b
+        $rowDupCart    = Find-InfoRow -Ws $wsInfo -Label 'Dubblett Cartridge S/N'
+        if (-not $rowDupCart) { $rowDupCart = Find-InfoRow -Ws $wsInfo -Label 'Dublett Cartridge S/N' }
+        # Instrumentrad
+        $rowInst       = Find-InfoRow -Ws $wsInfo -Label 'Använda INF/GX'
+
+        $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity'
+if (-not $rowBag) { $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity:' }
+if (-not $rowBag) { $rowBag = 14 }  # fallback till din standardrad
+
+# --- Skriv exakt en gång till B14 (eller B$rowBag) ---
+$wsInfo.Cells["B$rowBag"].Style.Numberformat.Format = '@'
+$wsInfo.Cells["B$rowBag"].Value = $infSummary
+
+        if ($isNewLayout) {
+            # Nya layoutens LSP-etikett är "LSP"
+            $rowLsp = Find-InfoRow -Ws $wsInfo -Label 'LSP'
+            # Standardrader om någon etikett saknas
+            if (-not $rowCsvFile)   { $rowCsvFile   = 8 }
+            if (-not $rowLsp)       { $rowLsp       = 9 }
+            if (-not $rowAntal)     { $rowAntal     = 10 }
+            if (-not $rowDupSample) { $rowDupSample = 11 }
+            if (-not $rowDupCart)   { $rowDupCart   = 12 }
+            if (-not $rowInst)      { $rowInst      = 13 }
+
+        }
+
+        # Sätt värden på respektive rad (kolumn B). Nummerformat för text
+        if ($selCsv) {
+            $wsInfo.Cells["B$rowCsvFile"].Style.Numberformat.Format = '@'
+            $wsInfo.Cells["B$rowCsvFile"].Value = (Split-Path $selCsv -Leaf)
+        } else {
+            $wsInfo.Cells["B$rowCsvFile"].Value = ''
+        }
+        # LSP från CSV (om tillgänglig); annars använd GUI-värdet
+        if ($lspSummary -and $lspSummary -ne '') {
+            $wsInfo.Cells["B$rowLsp"].Style.Numberformat.Format = '@'
+            $wsInfo.Cells["B$rowLsp"].Value = $lspSummary
+        } else {
+            $wsInfo.Cells["B$rowLsp"].Style.Numberformat.Format = '@'
+            $wsInfo.Cells["B$rowLsp"].Value = $lsp
+        }
+        # Antal tester
+        $wsInfo.Cells["B$rowAntal"].Value = $csvStats.TestCount
+        $wsInfo.Cells["B$rowAntal"].Style.Numberformat.Format = '@'
+        $wsInfo.Cells["B$rowAntal"].Value = "$($csvStats.TestCount)"
+        # Dubblett Sample ID (skriv endast om rad finns i mallen)
+        if ($rowDupSample) {
+            $wsInfo.Cells["B$rowDupSample"].Value = $dupSampleText
+        }
+        # Dubblett Cartridge S/N
+        if ($rowDupCart) {
+            $wsInfo.Cells["B$rowDupCart"].Value = $dupCartText
+        }
+        # Använda INF/GX
+        $wsInfo.Cells["B$rowInst"].Value = $instText
+        # Bag Numbers Tested Using Infinity
+    } catch {
+        Gui-Log ("⚠️ CSV data-fel: " + $_.Exception.Message) 'Warn'
+    }
 
 # --- Meta & källor ---
     $csvLeaf = ''
@@ -2715,8 +3713,8 @@ try {
     if (-not $miniVal) { $miniVal = 'N/A' }
 
     $hdNeg = $null; $hdPos = $null
-    try { $hdNeg = Get-SealHeaderDocInfo -Pkg $pkgNeg } catch {}
-    try { $hdPos = Get-SealHeaderDocInfo -Pkg $pkgPos } catch {}
+    try { $hdNeg = Get-SealHeaderDocInfo -Pkg $pkgNeg } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+    try { $hdPos = Get-SealHeaderDocInfo -Pkg $pkgPos } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     if (-not $hdNeg) { $hdNeg = [pscustomobject]@{Raw='';DocNo='';Rev=''} }
     if (-not $hdPos) { $hdPos = [pscustomobject]@{Raw='';DocNo='';Rev=''} }
 
@@ -2725,34 +3723,18 @@ try {
     $wsInfo.Cells['B4'].Value = (Get-Date).ToString('yyyy-MM-dd HH:mm')
     $wsInfo.Cells['B5'].Value = if ($miniVal) { $miniVal } else { 'N/A' }
 
-    # CSV-raden (rad 6) visar vald CSV-fil (om någon)
-    $wsInfo.Cells['A7'].Value = 'CSV'
-    if ($selCsv) {
-        $wsInfo.Cells['B7'].Style.Numberformat.Format = '@'
-        $wsInfo.Cells['B7'].Value = (Split-Path $selCsv -Leaf)
-    } else {
-        $wsInfo.Cells['B7'].Value = ''
-    }
-
-    $wsInfo.Cells['A8'].Value = 'Antal tester'
-    $wsInfo.Cells['A8'].Style.Font.Bold = $false
-
-    $wsInfo.Cells['B8' ].Value = $csvStats.TestCount
-    $wsInfo.Cells['B9' ].Value = $dupText
-    $wsInfo.Cells['B10'].Value = $lspText
-    $wsInfo.Cells['B11'].Value = $instText
-
     $selLsp = $null
     try {
         if (Get-Variable -Name clbLsp -ErrorAction SilentlyContinue) {
             $selLsp = Get-CheckedFilePath $clbLsp
         }
-    } catch {}
+    } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+
     $batch = $null
     # Få batch från POS → NEG fallback
-    try { if ($selPos) { $batch = Get-BatchFromSealFile $selPos } } catch {}
+    try { if ($selPos) { $batch = Get-BatchFromSealFile $selPos } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     if (-not $batch) {
-        try { if ($selNeg) { $batch = Get-BatchFromSealFile $selNeg } } catch {}
+        try { if ($selNeg) { $batch = Get-BatchFromSealFile $selNeg } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     }
     $batchEsc = ''
     if ($batch) { $batchEsc = [uri]::EscapeDataString($batch) }
@@ -2769,23 +3751,14 @@ try {
     if ($batch) { $linkText = ("Öppna " + $batch) }
 
     # --- Klickbar batch-länk (POS -> NEG fallback) ---
-    function Get-BatchFromSealFile {
-        param([string]$Path)
-        if (-not (Test-Path -LiteralPath $Path)) { return $null }
-        try {
-            $p = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
-            $ws  = $p.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
-            $bn  = $null
-            if ($ws) { $bn = ($ws.Cells['D2'].Text + '').Trim() }
-            $p.Dispose()
-            return $bn
-        } catch { return $null }
-    }
+    
+# (moved function to top-level: lifted for readability)
+
     $batch = $null
     if ($selPos) { $batch = Get-BatchFromSealFile $selPos }
     if (-not $batch -and $selNeg) { $batch = Get-BatchFromSealFile $selNeg }
 
-    # Skriv SharePoint-batchlänk i en fast rad (rad 9)
+    # Skriv SharePoint-batchlänk i en fast rad (rad 34)
     $batchEsc = ''
     if ($batch) { $batchEsc = [uri]::EscapeDataString($batch) }
     $lspEsc = ''
@@ -2799,9 +3772,9 @@ try {
     }
     $linkText = 'Ingen batch funnen'
     if ($batch) { $linkText = ("Öppna " + $batch) }
-    $wsInfo.Cells['A28'].Value = 'SharePoint Batch Link'
-    $wsInfo.Cells['A28'].Style.Font.Bold = $true
-    Add-Hyperlink -Cell $wsInfo.Cells['B28'] -Text $linkText -Url $url
+    $wsInfo.Cells['A34'].Value = 'SharePoint Batch'
+    $wsInfo.Cells['A34'].Style.Font.Bold = $true
+    Add-Hyperlink -Cell $wsInfo.Cells['B34'] -Text $linkText -Url $url
 
 
     $linkMap = [ordered]@{
@@ -2811,7 +3784,7 @@ try {
         'BMRAM'        = 'https://cepheid62468.coolbluecloud.com/'
         'Agile'        = 'https://agileprod.cepheid.com/Agile/default/login-cms.jsp'
     }
-    $rowLink = 29
+    $rowLink = 35
     foreach ($key in $linkMap.Keys) {
         $wsInfo.Cells["A$rowLink"].Value = $key
         # Förkorta texten som visas i cellen till "LÄNK" enligt mallens stil
@@ -2841,29 +3814,15 @@ try {
                 }
             }
         }
+if (-not (Get-Command Find-LabelValueRightward -ErrorAction SilentlyContinue)) { 
+# (moved function to top-level: lifted for readability)
 
-        function Find-LabelValueRightward {
-    param(
-        [OfficeOpenXml.ExcelWorksheet]$Ws,
-        [string]$Label,
-        [int]$MaxRows = 200,
-        [int]$MaxCols = 40
-    )
-    if (-not $Ws -or -not $Ws.Dimension) { return $null }
-    $rx = [regex]('(?i)^\s*' + [regex]::Escape($Label) + '\s*$')
-    $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
-    if (-not $hit) { return $null }
-    $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
-    for ($c = $hit.Col + 1; $c -le $cMax; $c++) {
-        $t = ($Ws.Cells[$hit.Row,$c].Text + '').Trim()
-        if ($t) { return $t }
-    }
-    return $null
 }
+
 
         if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
             Gui-Log ("🔎 WS hittad: " + (Split-Path $selLsp -Leaf)) 'Info'
-            # LSP-filen finns. Vi extraherar endast headern via Extract-WorksheetHeader längre ned.
+            # LSP-filen finns. Vi extraherar endast headern via Extract-WorksheetHeader_Robust längre ned.
             # Tidigare logik för att extrahera och infoga Test Summary och SPC har tagits bort för att förenkla.
             # Eventuell headerinformation från denna WS används i sammanfattningen nedan.
         } else {
@@ -2882,13 +3841,27 @@ try {
             if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
                 try {
                     $tmpPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selLsp))
-                    $headerWs = Extract-WorksheetHeader -Pkg $tmpPkg
-                    $tmpPkg.Dispose()
+                    $headerWs = Extract-WorksheetHeader_Robust -Pkg $tmpPkg
+
+
+            # === NYTT: Konsistenskontroll av LSP-header över ALLA flikar ===
+            $wsHeaderRows  = Get-WorksheetHeaderPerSheet -Pkg $tmpPkg
+$wsHeaderCheck = Compare-WorksheetHeaderRows -Rows $wsHeaderRows
+
+            # Logga resultat av header-kontrollen. Eventuell utskrift sker senare på specifika rader.
+            try {
+                if ($wsHeaderCheck.Issues -gt 0 -and $wsHeaderCheck.Summary) {
+                    Gui-Log ("Worksheet header-avvikelser: {0} – se Information!" -f $wsHeaderCheck.Summary) 'Warn'
+                } else {
+                    Gui-Log "Worksheet header konsekvent över alla flikar." 'Info'
+                }
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                $tmpPkg.Dispose()
                 } catch {}
             }
             # Hämta header från NEG/POS
-            try { $headerNeg = Extract-SealTestHeader -Pkg $pkgNeg } catch {}
-            try { $headerPos = Extract-SealTestHeader -Pkg $pkgPos } catch {}
+            try { $headerNeg = Extract-SealTestHeader -Pkg $pkgNeg } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+            try { $headerPos = Extract-SealTestHeader -Pkg $pkgPos } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
             # Om vissa fält i headern inte hittades via header/footer, försök att hitta dem i själva
             # arbetsbladet genom att söka efter etiketter och hämta värdet i cellen till höger.
@@ -2974,7 +3947,7 @@ try {
                         $headerWs.CartridgeNo = $m[0].Groups[1].Value
                     }
                 }
-            } catch {}
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                     $tmpPkg2.Dispose()
                 }
             } catch {}
@@ -2991,7 +3964,7 @@ try {
                     }
                     $tmpPkg3.Dispose()
                 }
-            } catch {}
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             try {
                 if ($selNeg -and -not $headerNeg.Effective) {
                     $tmpPkg4 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selNeg))
@@ -3003,13 +3976,13 @@ try {
                     }
                     $tmpPkg4.Dispose()
                 }
-            } catch {}
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             # Fastställ batcher
             $wsBatch   = if ($headerWs -and $headerWs.BatchNo) { $headerWs.BatchNo } else { $null }
             $sealBatch = $batch
             if (-not $sealBatch) {
-                try { $sealBatch = Get-BatchFromSealFile $selPos } catch {}
-                if (-not $sealBatch) { try { $sealBatch = Get-BatchFromSealFile $selNeg } catch {} }
+                try { $sealBatch = Get-BatchFromSealFile $selPos } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                if (-not $sealBatch) { try { $sealBatch = Get-BatchFromSealFile $selNeg } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }
             }
             $batchMatchFlag = $null
             if ($wsBatch -and $sealBatch) { $batchMatchFlag = ($wsBatch -eq $sealBatch) }
@@ -3024,113 +3997,179 @@ try {
             $noteStr = ''
             if ($headerNeg -and $headerNeg.DocumentNumber -and $headerNeg.DocumentNumber -ne 'D10552') { $noteStr += ("NEG DocNo (" + $headerNeg.DocumentNumber + ") != D10552; ") }
             if ($headerPos -and $headerPos.DocumentNumber -and $headerPos.DocumentNumber -ne 'D10552') { $noteStr += ("POS DocNo (" + $headerPos.DocumentNumber + ") != D10552; ") }
-            # Skriv värden i kolumn B enligt mallens radnummer (17–31)
-            # Worksheet-fil
+            # Dynamiskt hitta rader för header-information (Worksheet, POS, NEG) genom att söka efter etiketter i kolumn A.
+            # Find-InfoRow-funktionen definieras tidigare i samma event och återanvänds här.
+
+            # Worksheet‑sektion
+            $rowWsFile = Find-InfoRow -Ws $wsInfo -Label 'Worksheet'
+            if (-not $rowWsFile) { $rowWsFile = 17 }
+            $rowPart  = $rowWsFile + 1
+            $rowBatch = $rowWsFile + 2
+            $rowCart  = $rowWsFile + 3
+            $rowDoc   = $rowWsFile + 4
+            $rowRev   = $rowWsFile + 5
+            $rowEff   = $rowWsFile + 6
+
+            # Seal Test POS‑sektion
+            $rowPosFile = Find-InfoRow -Ws $wsInfo -Label 'Seal Test POS'
+            if (-not $rowPosFile) {
+                # Om ej hittad, anta fyra rader efter Worksheet‑sektionen eller använd tidigare fallback (24)
+                if ($rowWsFile) { $rowPosFile = $rowWsFile + 7 } else { $rowPosFile = 24 }
+            }
+            $rowPosDoc = $rowPosFile + 1
+            $rowPosRev = $rowPosFile + 2
+            $rowPosEff = $rowPosFile + 3
+
+            # Seal Test NEG‑sektion
+            $rowNegFile = Find-InfoRow -Ws $wsInfo -Label 'Seal Test NEG'
+            if (-not $rowNegFile) {
+                # Om ej hittad, anta fyra rader efter POS‑sektionen
+                $rowNegFile = $rowPosFile + 4
+            }
+            $rowNegDoc = $rowNegFile + 1
+            $rowNegRev = $rowNegFile + 2
+            $rowNegEff = $rowNegFile + 3
+
+            # Worksheet-filnamn
             if ($selLsp) {
-                $wsInfo.Cells['B12'].Style.Numberformat.Format = '@'
-                $wsInfo.Cells['B12'].Value = (Split-Path $selLsp -Leaf)
+                $wsInfo.Cells["B$rowWsFile"].Style.Numberformat.Format = '@'
+                $wsInfo.Cells["B$rowWsFile"].Value = (Split-Path $selLsp -Leaf)
             } else {
-                $wsInfo.Cells['B12'].Value = ''
+                $wsInfo.Cells["B$rowWsFile"].Value = ''
             }
  
-# Konsensus mellan WS/POS/NEG (ändrar inte källvärden)
-$consPart  = Get-ConsensusValue -Type 'Part'      -Ws $headerWs.PartNo      -Pos $headerPos.PartNumber   -Neg $headerNeg.PartNumber
-$consBatch = Get-ConsensusValue -Type 'Batch'     -Ws $headerWs.BatchNo     -Pos $headerPos.BatchNumber  -Neg $headerNeg.BatchNumber
-$consCart  = Get-ConsensusValue -Type 'Cartridge' -Ws $headerWs.CartridgeNo -Pos $headerPos.CartridgeNo  -Neg $headerNeg.CartridgeNo
+            # Konsensus mellan WS/POS/NEG (ändrar inte källvärden)
+            $consPart  = Get-ConsensusValue -Type 'Part'      -Ws $headerWs.PartNo      -Pos $headerPos.PartNumber   -Neg $headerNeg.PartNumber
+            $consBatch = Get-ConsensusValue -Type 'Batch'     -Ws $headerWs.BatchNo     -Pos $headerPos.BatchNumber  -Neg $headerNeg.BatchNumber
+            $consCart  = Get-ConsensusValue -Type 'Cartridge' -Ws $headerWs.CartridgeNo -Pos $headerPos.CartridgeNo  -Neg $headerNeg.CartridgeNo
 
-# Extra fallback för Cartridge: om konsensus saknas → försök från LSP-filnamn (5–7 siffror)
-if (-not $consCart.Value -and $selLsp) {
-    $fnCart = Split-Path $selLsp -Leaf
-    $mCart  = [regex]::Match($fnCart,'(?<!\d)(\d{5,7})(?!\d)')
-    if ($mCart.Success) {
-        $consCart = @{
-            Value  = $mCart.Groups[1].Value
-            Source = 'FILENAME'
-            Note   = 'Filename fallback'
-        }
-    }
-}
+            # Extra fallback för Cartridge: om konsensus saknas → försök från LSP-filnamn (5–7 siffror)
+            if (-not $consCart.Value -and $selLsp) {
+                $fnCart = Split-Path $selLsp -Leaf
+                $mCart  = [regex]::Match($fnCart,'(?<!\d)(\d{5,7})(?!\d)')
+                if ($mCart.Success) {
+                    $consCart = @{
+                        Value  = $mCart.Groups[1].Value
+                        Source = 'FILENAME'
+                        Note   = 'Filename fallback'
+                    }
+                }
+            }
 
-# Skriv ut konsensusvärden i Information!B18–B20
-if ($consPart.Value)  { $wsInfo.Cells['B13'].Value = $consPart.Value }  else { $wsInfo.Cells['B13'].Value = '' }
-if ($consBatch.Value) { $wsInfo.Cells['B14'].Value = $consBatch.Value } else { $wsInfo.Cells['B14'].Value = '' }
-if ($consCart.Value)  { $wsInfo.Cells['B15'].Value = $consCart.Value }  else { $wsInfo.Cells['B15'].Value = '' }
+            # Skriv ut konsensusvärden enligt ny layout
+            if ($consPart.Value)  { $wsInfo.Cells["B$rowPart"].Value = $consPart.Value }  else { $wsInfo.Cells["B$rowPart"].Value = '' }
+            if ($consBatch.Value) { $wsInfo.Cells["B$rowBatch"].Value = $consBatch.Value } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
+            if ($consCart.Value)  { $wsInfo.Cells["B$rowCart"].Value = $consCart.Value }  else { $wsInfo.Cells["B$rowCart"].Value = '' }
 
-# (Valfritt) källa/kommentar – syns vid hover i Excel
-try { if ($consPart.Note)  { [void]$wsInfo.Cells['B13'].AddComment($consPart.Note,  'DocMerge') } } catch {}
-try { if ($consBatch.Note) { [void]$wsInfo.Cells['B14'].AddComment($consBatch.Note, 'DocMerge') } } catch {}
-try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Note,  'DocMerge') } } catch {}
+            # Bestäm om batch-mismatch ska visas som notering
+            $batchMismatch = $false
+            try {
+                if ($headerNeg -and $headerPos -and $headerNeg.BatchNumber -and $headerPos.BatchNumber) {
+                    $normNeg = Normalize-Id -Value $headerNeg.BatchNumber -Type 'Batch'
+                    $normPos = Normalize-Id -Value $headerPos.BatchNumber -Type 'Batch'
+                    if ($normNeg -and $normPos -and $normNeg -ne $normPos) { $batchMismatch = $true }
+                }
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
-# (Valfritt) visa källa i kolumn C
-# $wsInfo.Cells['C18'].Value = $consPart.Source
-# $wsInfo.Cells['C19'].Value = $consBatch.Source
-# $wsInfo.Cells['C20'].Value = $consCart.Source
+            # Lägg till kommentarer endast om POS/NEG batch skiljer sig
+            if ($batchMismatch) {
+                try { if ($consPart.Note)  { [void]$wsInfo.Cells["B$rowPart"].AddComment($consPart.Note,  'DocMerge') } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                try { if ($consBatch.Note) { [void]$wsInfo.Cells["B$rowBatch"].AddComment($consBatch.Note, 'DocMerge') } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                try { if ($consCart.Note)  { [void]$wsInfo.Cells["B$rowCart"].AddComment($consCart.Note,  'DocMerge') } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+            }
+
+            # Fyll i header-avvikelser per fält i kolumn C (PartNo, BatchNo, CartridgeNo)
+            # Använd informationen från wsHeaderCheck.Details som returneras av Compare-WorksheetHeaderSet_Robust.
+            try {
+                if ($wsHeaderCheck -and $wsHeaderCheck.Details) {
+                    $linesDev = ($wsHeaderCheck.Details -split "`r?`n")
+                    $devPart  = $null
+                    $devBatch = $null
+                    $devCart  = $null
+                    foreach ($ln in $linesDev) {
+                        if ($ln -match '^-\s*PartNo[^:]*:\s*(.+)$') {
+                            $devPart = $matches[1].Trim()
+                        } elseif ($ln -match '^-\s*BatchNo[^:]*:\s*(.+)$') {
+                            $devBatch = $matches[1].Trim()
+                        } elseif ($ln -match '^-\s*CartridgeNo[^:]*:\s*(.+)$') {
+                            $devCart = $matches[1].Trim()
+                        }
+                    }
+                    if ($devPart) {
+                        $wsInfo.Cells["C$rowPart"].Style.Numberformat.Format = '@'
+                        $wsInfo.Cells["C$rowPart"].Value = 'Avvikande flik: ' + $devPart
+                    }
+                    if ($devBatch) {
+                        $wsInfo.Cells["C$rowBatch"].Style.Numberformat.Format = '@'
+                        $wsInfo.Cells["C$rowBatch"].Value = 'Avvikande flik: ' + $devBatch
+                    }
+                    if ($devCart) {
+                        $wsInfo.Cells["C$rowCart"].Style.Numberformat.Format = '@'
+                        $wsInfo.Cells["C$rowCart"].Value = 'Avvikande flik: ' + $devCart
+                    }
+                }
+            } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
 
             # Dokumentnummer (inkl. attachment), Rev och Effective för Worksheet
             if ($headerWs) {
-
-            $doc = $headerWs.DocumentNumber
-            if ($doc) {
-            # klipp av svans som ibland limmas ihop i headern
-            $doc = ($doc -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim()
-            }
-            if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) {
-            $doc = "$doc Attachment $($headerWs.Attachment)"
-            }
-            $wsInfo.Cells['B16'].Value = $doc
-
-
-                $wsInfo.Cells['B17'].Value = $headerWs.Rev
-                $wsInfo.Cells['B18'].Value = $headerWs.Effective
+                $doc = $headerWs.DocumentNumber
+                if ($doc) {
+                    # klipp av svans som ibland limmas ihop i headern
+                    $doc = ($doc -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim()
+                }
+                if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) {
+                    $doc = "$doc Attachment $($headerWs.Attachment)"
+                }
+                $wsInfo.Cells["B$rowDoc"].Value = $doc
+                $wsInfo.Cells["B$rowRev"].Value = $headerWs.Rev
+                $wsInfo.Cells["B$rowEff"].Value = $headerWs.Effective
             } else {
-                $wsInfo.Cells['B16'].Value = ''
-                $wsInfo.Cells['B17'].Value = ''
-                $wsInfo.Cells['B18'].Value = ''
+                $wsInfo.Cells["B$rowDoc"].Value = ''
+                $wsInfo.Cells["B$rowRev"].Value = ''
+                $wsInfo.Cells["B$rowEff"].Value = ''
             }
             # Seal Test POS fil
             if ($selPos) {
-                $wsInfo.Cells['B19'].Style.Numberformat.Format = '@'
-                $wsInfo.Cells['B19'].Value = (Split-Path $selPos -Leaf)
+                $wsInfo.Cells["B$rowPosFile"].Style.Numberformat.Format = '@'
+                $wsInfo.Cells["B$rowPosFile"].Value = (Split-Path $selPos -Leaf)
             } else {
-                $wsInfo.Cells['B19'].Value = ''
+                $wsInfo.Cells["B$rowPosFile"].Value = ''
             }
             # Seal Test POS metadata
             if ($headerPos) {
                 # POS: ta bort ev. "Rev/Effective" som följt med
                 $docPos = $headerPos.DocumentNumber
                 if ($docPos) { $docPos = ($docPos -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
-                $wsInfo.Cells['B20'].Value = $docPos
-                $wsInfo.Cells['B21'].Value = $headerPos.Rev
-                $wsInfo.Cells['B22'].Value = $headerPos.Effective
+                $wsInfo.Cells["B$rowPosDoc"].Value = $docPos
+                $wsInfo.Cells["B$rowPosRev"].Value = $headerPos.Rev
+                $wsInfo.Cells["B$rowPosEff"].Value = $headerPos.Effective
             } else {
-                $wsInfo.Cells['B20'].Value = ''
-                $wsInfo.Cells['B21'].Value = ''
-                $wsInfo.Cells['B22'].Value = ''
+                $wsInfo.Cells["B$rowPosDoc"].Value = ''
+                $wsInfo.Cells["B$rowPosRev"].Value = ''
+                $wsInfo.Cells["B$rowPosEff"].Value = ''
             }
             # Seal Test NEG fil
             if ($selNeg) {
-                $wsInfo.Cells['B23'].Style.Numberformat.Format = '@'
-                $wsInfo.Cells['B23'].Value = (Split-Path $selNeg -Leaf)
+                $wsInfo.Cells["B$rowNegFile"].Style.Numberformat.Format = '@'
+                $wsInfo.Cells["B$rowNegFile"].Value = (Split-Path $selNeg -Leaf)
             } else {
-                $wsInfo.Cells['B23'].Value = ''
+                $wsInfo.Cells["B$rowNegFile"].Value = ''
             }
             # Seal Test NEG metadata
             if ($headerNeg) {
                 # NEG: ta bort ev. "Rev/Effective" som följt med
                 $docNeg = $headerNeg.DocumentNumber
                 if ($docNeg) { $docNeg = ($docNeg -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
-                $wsInfo.Cells['B24'].Value = $docNeg
-                $wsInfo.Cells['B25'].Value = $headerNeg.Rev
-                $wsInfo.Cells['B26'].Value = $headerNeg.Effective
+                $wsInfo.Cells["B$rowNegDoc"].Value = $docNeg
+                $wsInfo.Cells["B$rowNegRev"].Value = $headerNeg.Rev
+                $wsInfo.Cells["B$rowNegEff"].Value = $headerNeg.Effective
             } else {
-                $wsInfo.Cells['B24'].Value = ''
-                $wsInfo.Cells['B25'].Value = ''
-                $wsInfo.Cells['B26'].Value = ''
+                $wsInfo.Cells["B$rowNegDoc"].Value = ''
+                $wsInfo.Cells["B$rowNegRev"].Value = ''
+                $wsInfo.Cells["B$rowNegEff"].Value = ''
             }
-            # Töm eventuella överflödiga rader nedanför tabellen
-            $wsInfo.Cells['B34'].Value = ''
-            $wsInfo.Cells['B35'].Value = ''
+            # Töm eventuella överflödiga rader nedanför tabellen – ej nödvändig då layout definierad i mall
         } catch {
             Gui-Log ("⚠️ Header summary fel: " + $_.Exception.Message) 'Warn'
         }
@@ -3139,9 +4178,13 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
     Gui-Log "⚠️ Information-blad fel: $($_.Exception.Message)" 'Warn'
 }
 
+
+#endregion [FLOW]
+#region [FLOW] Equipment-blad
         # ============================
         # === Equipment-blad       ===
         # ============================
+
         try {
             if (Test-Path -LiteralPath $UtrustningListPath) {
                 $srcPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($UtrustningListPath))
@@ -3155,20 +4198,24 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                             if ($cell.Formula -or $cell.FormulaR1C1) { $val=$cell.Value; $cell.Formula=$null; $cell.FormulaR1C1=$null; $cell.Value=$val }
                         }
                         $colCount = $srcWs.Dimension.End.Column
-                        for ($c=1; $c -le $colCount; $c++) { try { $wsEq.Column($c).Width = $srcWs.Column($c).Width } catch {} }
+                        for ($c=1; $c -le $colCount; $c++) { try { $wsEq.Column($c).Width = $srcWs.Column($c).Width } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }
                     }
                 }
                 $srcPkg.Dispose()
             } else { Gui-Log "ℹ️ Utrustningslista saknas: $UtrustningListPath" 'Info' }
         } catch { Gui-Log "⚠️ Kunde inte kopiera 'Equipment': $($_.Exception.Message)" 'Warn' }
 
+
+#endregion [FLOW]
+#region [FLOW] Control Material
         # ============================
         # === Control Material      ===
         # ============================
+
         try {
             if ($controlTab -and (Test-Path -LiteralPath $RawDataPath)) {
                 $srcPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($RawDataPath))
-                try { $srcPkg.Workbook.Calculate() } catch {}
+                try { $srcPkg.Workbook.Calculate() } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                 $candidates = if ($controlTab -match '\|') { $controlTab -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { @($controlTab) }
                 $srcWs = $null
                 foreach ($cand in $candidates) {
@@ -3186,7 +4233,7 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                         foreach ($cell in $wsCM.Cells[$wsCM.Dimension.Address]) {
                             if ($cell.Formula -or $cell.FormulaR1C1) { $v=$cell.Value; $cell.Formula=$null; $cell.FormulaR1C1=$null; $cell.Value=$v }
                         }
-                        try { $wsCM.Cells[$wsCM.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                        try { $wsCM.Cells[$wsCM.Dimension.Address].AutoFitColumns() | Out-Null } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                     }
                     Gui-Log "✅ Control Material kopierad: '$($srcWs.Name)' → '$destName'" 'Info'
                 } else { Gui-Log "ℹ️ Hittade inget blad i kontrollfilen som matchar '$controlTab'." 'Info' }
@@ -3194,15 +4241,19 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
             } else { Gui-Log "ℹ️ Ingen Control-flik skapad (saknar mappning eller kontrollfil)." 'Info' }
         } catch { Gui-Log "⚠️ Control Material-fel: $($_.Exception.Message)" 'Warn' }
 
+
+#endregion [FLOW]
+#region [FLOW] SharePoint Info
         # ============================
         # === SharePoint Info       ===
         # ============================
+
         try {
             # 0) checkbox
             if ($chkSharePointInfo -and -not $chkSharePointInfo.Checked) {
                 Gui-Log "ℹ️ SharePoint Info ej valt – hoppar över." 'Info'
                 # Rensa ev. gammal flik när ej valt:
-                try { $old = $pkgOut.Workbook.Worksheets["SharePoint Info"]; if ($old) { $pkgOut.Workbook.Worksheets.Delete($old) } } catch {}
+                try { $old = $pkgOut.Workbook.Worksheets["SharePoint Info"]; if ($old) { $pkgOut.Workbook.Worksheets.Delete($old) } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
             } else {
                 # 1) Säkerställ anslutning
                 $spOk = $false
@@ -3217,20 +4268,12 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                 }
 
                 # 2) Hämta Batch # från POS→NEG (D2)
-                function Get-BatchFromSealFile {
-                    param([string]$Path)
-                    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-                    try {
-                        $p = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
-                        $ws  = $p.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
-                        $bn  = if ($ws) { ($ws.Cells['D2'].Text + '').Trim() } else { $null }
-                        $p.Dispose()
-                        return $bn
-                    } catch { return $null }
-                }
+                
+# (moved function to top-level: lifted for readability)
+
                 $batch = $null
-                try { $batch = Get-BatchFromSealFile $selPos } catch {}
-                if (-not $batch) { try { $batch = Get-BatchFromSealFile $selNeg } catch {} }
+                try { $batch = Get-BatchFromSealFile $selPos } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+                if (-not $batch) { try { $batch = Get-BatchFromSealFile $selNeg } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } } }
 
                 if (-not $batch) {
                     Gui-Log "ℹ️ Inget Batch # i POS/NEG – skriver tom SharePoint Info." 'Info'
@@ -3242,107 +4285,38 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                         $wsSp = $pkgOut.Workbook.Worksheets.Add("SharePoint Info")
                         $wsSp.Cells[1,1].Value = "Rubrik"; $wsSp.Cells[1,2].Value = "Värde"
                         $wsSp.Cells[2,1].Value = "Batch";  $wsSp.Cells[2,2].Value = "—"
-                        try { $wsSp.Cells[$wsSp.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                        try { $wsSp.Cells[$wsSp.Dimension.Address].AutoFitColumns() | Out-Null } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                     }
                 } else {
                     Gui-Log "🔎 Batch hittad: $batch" 'Info'
 
-                    # 3) Fält / rubrik / ordning
-                    $fields = @(
-                        'Work_x0020_Center','Title','Batch_x0023_','SAP_x0020_Batch_x0023__x0020_2',
-                        'LSP','Material','BBD_x002f_SLED','Actual_x0020_startdate_x002f__x0',
-                        'PAL_x0020__x002d__x0020_Sample_x','Sample_x0020_Reagent_x0020_P_x00',
-                        'Order_x0020_quantity','Total_x0020_good','ITP_x0020_Test_x0020_results',
-                        'IPT_x0020__x002d__x0020_Testing_0','MES_x0020__x002d__x0020_Order_x0'
-                    )
-                    $renameMap = @{
-                        'Work Center'            = 'Work Center'
-                        'Title'                  = 'Order#'
-                        'Batch#'                 = 'SAP Batch#'
-                        'SAP Batch# 2'           = 'SAP Batch# 2'
-                        'LSP'                    = 'LSP'
-                        'Material'               = 'Material'
-                        'BBD/SLED'               = 'BBD/SLED'
-                        'Actual startdate/_x0'   = 'ROBAL - Actual start date/time'
-                        'PAL - Sample_x'         = 'Sample Reagent use'
-                        'Sample Reagent P'       = 'Sample Reagent P/N'
-                        'Order quantity'         = 'Order quantity'
-                        'Total good'             = 'ROBAL - Till Packning'
-                        'IPT Test results'       = 'IPT Test results'
-                        'IPT - Testing_0'        = 'IPT - Testing Finalized'
-                        'MES - Order_x0'         = 'MES Order'
-                    }
-                    $desiredOrder = @(
-                        'Work Center','Order#','SAP Batch#','SAP Batch# 2','LSP','Material','BBD/SLED',
-                        'ROBAL - Actual start date/time','Sample Reagent use','Sample Reagent P/N',
-                        'Order quantity','ROBAL - Till Packning','IPT Test results',
-                        'IPT - Testing Finalized','MES Order'
-                    )
-                    $dateFields      = @('BBD/SLED','ROBAL - Actual start date/time','IPT - Testing Finalized')
-                    $shortDateFields = @('BBD/SLED')  # endast datum
+                    
+# 3) Fält / rubrik / ordning (via SP HELPERS)
+$fields         = Get-SpFieldInternalNames
+$desiredOrder   = Get-SpDesiredOrder
 
-                    $rows = @()
-                    if ($spOk) {
-                        try {
-                            $items = Get-PnPListItem -List "Cepheid | Production orders" -Fields $fields -PageSize 2000 -ErrorAction Stop
-                            $match = $items | Where-Object {
-                                $v1 = $_['Batch_x0023_']; $v2 = $_['SAP_x0020_Batch_x0023__x0020_2']
-                                $s1 = if ($null -ne $v1) { ([string]$v1).Trim() } else { '' }
-                                $s2 = if ($null -ne $v2) { ([string]$v2).Trim() } else { '' }
-                                $s1 -eq $batch -or $s2 -eq $batch
-                            } | Select-Object -First 1
+$rows = @()
+if ($spOk) {
+    try {
+        $items = Get-PnPListItem -List "Cepheid | Production orders" -Fields $fields -PageSize 2000 -ErrorAction Stop
+        $match = $items | Where-Object {
+            $v1 = $_['Batch_x0023_']; $v2 = $_['SAP_x0020_Batch_x0023__x0020_2']
+            $s1 = if ($null -ne $v1) { ([string]$v1).Trim() } else { '' }
+            $s2 = if ($null -ne $v2) { ([string]$v2).Trim() } else { '' }
+            $s1 -eq $batch -or $s2 -eq $batch
+        } | Select-Object -First 1
 
-                            if ($match) {
-                                foreach ($f in $fields) {
-                                    $val = $match[$f]
-
-                                    # label norm
-                                    $label = $f -replace '_x0020_', ' ' `
-                                                 -replace '_x002d_', '-' `
-                                                 -replace '_x0023_', '#' `
-                                                 -replace '_x002f_', '/' `
-                                                 -replace '_x2013_', '–' `
-                                                 -replace '_x00',''
-                                    $label = $label.Trim()
-                                    if ($renameMap.ContainsKey($label)) { $label = $renameMap[$label] }
-
-                                    if ($null -ne $val -and $val -ne '') {
-                                        if ($val -eq $true) { $val = 'JA' }
-                                        elseif ($val -eq $false) { $val = 'NEJ' }
-
-                                        # datumformat
-                                        $dt = $null
-                                        if ($val -is [datetime]) { $dt = [datetime]$val }
-                                        else { try { $dt = [datetime]::Parse($val) } catch { $dt = $null } }
-
-                                        if ($dt -ne $null -and ($dateFields -contains $label)) {
-                                            $fmt = if ($shortDateFields -contains $label) { 'yyyy-MM-dd' } else { 'yyyy-MM-dd HH:mm' }
-                                            $val = $dt.ToString($fmt)
-                                        }
-
-                                        $rows += [pscustomobject]@{ Rubrik = $label; 'Värde' = $val }
-                                    }
-                                }
-
-                                # ordning
-                                if ($rows.Count -gt 0) {
-                                    $ordered = @()
-                                    foreach ($label in $desiredOrder) {
-                                        $hit = $rows | Where-Object { $_.Rubrik -eq $label } | Select-Object -First 1
-                                        if ($hit) { $ordered += $hit }
-                                    }
-                                    if ($ordered.Count -gt 0) { $rows = $ordered }
-                                }
-                                Gui-Log "📄 SharePoint-post hittad – skriver blad." 'Info'
-                            } else {
-                                Gui-Log "ℹ️ Ingen post i SharePoint för Batch=$batch." 'Info'
-                            }
-                        } catch {
-                            Gui-Log "⚠️ SP: Get-PnPListItem misslyckades: $($_.Exception.Message)" 'Warn'
-                        }
-                    }
-
-                    # Skriv blad (även tomt)
+        if ($match) {
+            $rows = Build-SpRowsFromListItem -Item $match
+            Gui-Log "📄 SharePoint-post hittad – skriver blad." 'Info'
+        } else {
+            Gui-Log "ℹ️ Ingen post i SharePoint för Batch=$batch." 'Info'
+        }
+    } catch {
+        if (-not $script:SilenceAutoCatchLogs) { Gui-Log ("⚠️ SP: Get-PnPListItem misslyckades: " + $_.Exception.Message) 'Warn' }
+    }
+}
+# Skriv blad (även tomt)
                     if (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue) {
                         [void](Write-SPSheet-Safe -Pkg $pkgOut -Rows $rows -DesiredOrder $desiredOrder -Batch $batch)
                     } else {
@@ -3356,7 +4330,7 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                             $wsSp.Cells[2,1].Value = "Batch";  $wsSp.Cells[2,2].Value = $batch
                             $wsSp.Cells[3,1].Value = "Info";   $wsSp.Cells[3,2].Value = "No matching SharePoint row"
                         }
-                        try { $wsSp.Cells[$wsSp.Dimension.Address].AutoFitColumns() | Out-Null } catch {}
+                        try { $wsSp.Cells[$wsSp.Dimension.Address].AutoFitColumns() | Out-Null } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                     }
 
                     try {
@@ -3365,7 +4339,7 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                             $slBatchLink.Tag  = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?viewid=6c9e53c9-a377-40c1-a154-13a13866b52b&view=7&q=$batch"
                             $slBatchLink.Enabled = $true
                         }
-                    } catch {}
+                    } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 
                     # Wrap "Sample Reagent use"
                     try {
@@ -3376,7 +4350,7 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                                 if (($wsSP.Cells[$r,$labelCol].Text).Trim() -eq 'Sample Reagent use') {
                                     $wsSP.Cells[$r,$valueCol].Style.WrapText = $true
                                     $wsSP.Cells[$r,$valueCol].Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
-                                    try { $wsSP.Column($valueCol).Width = 55 } catch {}
+                                    try { $wsSP.Column($valueCol).Width = 55 } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
                                     $wsSP.Row($r).CustomHeight = $true
                                     break
                                 }
@@ -3391,9 +4365,13 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
             Gui-Log "⚠️ SP-blad: $($_.Exception.Message)" 'Warn'
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Header watermark
         # ============================
         # === Header watermark     ===
         # ============================
+
         try {
             foreach ($ws in $pkgOut.Workbook.Worksheets) {
                 try {
@@ -3415,11 +4393,15 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
             Gui-Log "⚠️ Kunde inte sätta tab-färg: $($_.Exception.Message)" 'Warn'
         }
 
+
+#endregion [FLOW]
+#region [FLOW] Spara & Audit
         # ============================
         # === Spara & Audit        ===
         # ============================
+
         $nowTs   = Get-Date -Format "yyyyMMdd_HHmmss"
-        $baseName= "DocMerge_output_${lsp}_$nowTs.xlsx"
+        $baseName= "$($env:USERNAME)_output_${lsp}_$nowTs.xlsx"
         if ($rbSaveInLsp.Checked) {
             $saveDir = Split-Path -Parent $selNeg
             $SavePath = Join-Path $saveDir $baseName
@@ -3459,22 +4441,24 @@ try { if ($consCart.Note)  { [void]$wsInfo.Cells['B15'].AddComment($consCart.Not
                     OutputFile      = $SavePath
                     Kommentar       = 'UNCONTROLLED rapport, ingen källfil ändrades automatiskt.'
                 }
-                $auditFile = Join-Path $auditDir ("DocMerge_audit_${nowTs}.csv")
+                $auditFile = Join-Path $auditDir ("$($env:USERNAME)_audit_${nowTs}.csv")
                 $auditObj | Export-Csv -Path $auditFile -NoTypeInformation -Encoding UTF8
             } catch { Gui-Log "⚠️ Kunde inte skriva revisionsfil: $($_.Exception.Message)" 'Warn' }
 
             # Öppna rapport i Excel
-            try { Start-Process -FilePath "excel.exe" -ArgumentList "`"$SavePath`"" } catch {}
+            try { Start-Process -FilePath "excel.exe" -ArgumentList "`"$SavePath`"" } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
         }
         catch { Gui-Log "⚠️ Kunde inte spara/öppna: $($_.Exception.Message)" 'Warn' }
 
     } finally {
-        try { if ($pkgNeg) { $pkgNeg.Dispose() } } catch {}
-        try { if ($pkgPos) { $pkgPos.Dispose() } } catch {}
-        try { if ($pkgOut) { $pkgOut.Dispose() } } catch {}
+        try { if ($pkgNeg) { $pkgNeg.Dispose() } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+        try { if ($pkgPos) { $pkgPos.Dispose() } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+        try { if ($pkgOut) { $pkgOut.Dispose() } } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
     }
-
-    Gui-Log "🔐 Klar."
+    } finally {
+        # valfritt
+        # Gui-Log 'Klar.'
+    }
 })
 
 # === Tooltip-inställningar ===
@@ -3508,10 +4492,36 @@ function Enable-DoubleBuffer {
     $pi = [Windows.Forms.Control].GetProperty('DoubleBuffered',[Reflection.BindingFlags]'NonPublic,Instance')
     foreach($c in @($content,$pLog,$grpPick,$grpSign,$grpSave)) { if ($c) { $pi.SetValue($c,$true,$null) } }
 }
-try { Set-Theme 'light' } catch {}
+try { Set-Theme 'light' } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
 Enable-DoubleBuffer
 Update-BatchLink  # Initiera statuslänk
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::Run($form)
 
-try{ Stop-Transcript | Out-Null }catch{}
+try { Stop-Transcript | Out-Null } catch { if (-not $script:SilenceAutoCatchLogs) { Gui-Log "⚠️ (auto) Ignored exception: $($_.Exception.Message)" 'Warn' } }
+#endregion [CHAPTER] EVENT HANDLERS
+#region [CHAPTER] MAIN
+# (Entry-point / ShowDialog / final wiring lives here if present)
+#endregion [CHAPTER] MAIN
+
+
+# ==============================================
+# ===============  ANCHOR INDEX  ================
+# ==============================================
+# Chapters:
+#   [CHAPTER] PREAMBLE | DEPENDENCIES | CORE HELPERS | CSV HELPERS | HEADER HELPERS | UI/WINFORMS | EVENT HANDLERS | MAIN
+# Flow blocks inside EVENT HANDLERS:
+#   [FLOW] SIGNATUR I NEG/POS
+#   [FLOW] CSV (Info/Control)
+#   [FLOW] Läs avvikelser
+#   [FLOW] Seal Test Info (blad)
+#   [FLOW] Testare (B43)
+#   [FLOW] Signatur-jämförelse
+#   [FLOW] STF Sum
+#   [FLOW] Information-blad
+#   [FLOW] Equipment-blad
+#   [FLOW] Control Material
+#   [FLOW] SharePoint Info
+#   [FLOW] Header watermark
+#   [FLOW] Spara & Audit
+# ==============================================
