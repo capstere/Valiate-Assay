@@ -1536,22 +1536,53 @@ if (-not (Get-Command Compare-WorksheetHeaderSet -ErrorAction SilentlyContinue))
 
 function _canon([string]$raw, [string]$type) {
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
     $txt = Normalize-HeaderText $raw
-            switch ($type) {
-                'Part'      { $m=[regex]::Match($txt,'Part No\.\s*:\s+(.*)'); return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
-                'Batch'     { $m=[regex]::Match($txt,'Batch No\(s\)\.\s*:\s+(.*)');  return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
-                'Cartridge' { $m=[regex]::Match($txt,'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)');   return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
-                'Doc'       { $m=[regex]::Match($txt,'Document Number:\s+(.*)');         return $(if($m.Success){$m.Groups[1].Value.ToUpper()}else{$txt.ToUpper()}) }
-                'REV'       { $m=[regex]::Match($txt,'ReV:\s+(.*)');   return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
-           
-'EFF' {
-    $dt = $null
-    if (Try-Parse-HeaderDate $txt ([ref]$dt)) { return $dt.ToString('yyyy-MM-dd') }
-    return $txt
-}
-                default     { return $txt }
-            }
+
+    switch ($type) {
+        'Part' {
+            $m = [regex]::Match($txt, '(?<!\d)(\d{3}-\d{4})(?!\d)')
+            if ($m.Success) { return $m.Groups[1].Value }
+            return $txt
         }
+        'Batch' {
+            $matchesList = [regex]::Matches($txt, '(?<!\d)(\d{10})(?!\d)')
+            if ($matchesList.Count -gt 0) {
+                $nums = @()
+                foreach ($m in $matchesList) { $nums += $m.Groups[1].Value }
+                return ($nums -join ', ')
+            }
+            return $txt
+        }
+        'Cartridge' {
+            $m = [regex]::Match($txt, '(?<!\d)(\d{5})(?!\d)')
+            if ($m.Success) { return $m.Groups[1].Value }
+            return $txt
+        }
+        'Doc' {
+            $m = [regex]::Match($txt, '(?i)(D\d{5})')
+            if ($m.Success) { return $m.Groups[1].Value.ToUpper() }
+            return $txt
+        }
+        'REV' {
+            $m = [regex]::Match($txt, '(?i)\b([A-Z]{1,2}(?:\.\d)?)\b')
+            if ($m.Success) { return $m.Groups[1].Value.ToUpper() }
+            return $txt
+        }
+        'EFF' {
+            $dt = $null
+            if (Try-Parse-HeaderDate $txt ([ref]$dt)) {
+                return $dt.ToString('yyyy-MM-dd')
+            }
+            $m = [regex]::Match($txt, '\b(\d{1,2}/\d{1,2}/\d{4})\b')
+            if ($m.Success) { return $m.Groups[1].Value }
+            return $txt
+        }
+        default {
+            return $txt
+        }
+    }
+}
 
         $keys = @(
             @{K='PartNo';         T='Part';      Required=$true;  Label='HasPartNoLabel'    },
@@ -3729,9 +3760,13 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
 
             # Skriv ut konsensusvärden enligt ny layout
-            if ($consPart.Value)  { $wsInfo.Cells["B$rowPart"].Value = $consPart.Value }  else { $wsInfo.Cells["B$rowPart"].Value = '' }
-            if ($consBatch.Value) { $wsInfo.Cells["B$rowBatch"].Value = $consBatch.Value } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
-            if ($consCart.Value)  { $wsInfo.Cells["B$rowCart"].Value = $consCart.Value }  else { $wsInfo.Cells["B$rowCart"].Value = '' }
+            $partOut  = if ($consPart.Value)  { _canon $consPart.Value  'Part'      } else { $null }
+            $batchOut = if ($consBatch.Value) { _canon $consBatch.Value 'Batch'     } else { $null }
+            $cartOut  = if ($consCart.Value)  { _canon $consCart.Value  'Cartridge' } else { $null }
+
+            if ($partOut)  { $wsInfo.Cells["B$rowPart"].Value  = $partOut  } else { $wsInfo.Cells["B$rowPart"].Value  = '' }
+            if ($batchOut) { $wsInfo.Cells["B$rowBatch"].Value = $batchOut } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
+            if ($cartOut)  { $wsInfo.Cells["B$rowCart"].Value  = $cartOut  } else { $wsInfo.Cells["B$rowCart"].Value  = '' }
 
             # Bestäm om batch-mismatch ska visas som notering
             $batchMismatch = $false
@@ -3760,11 +3795,11 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                     $devCart  = $null
                     foreach ($ln in $linesDev) {
                         if ($ln -match 'Part No\.\s*:\s+(.*)') {
-                            $devPart = $matches[1].Trim()
+                            $devPart = _canon $matches[1].Trim() 'Part'
                         } elseif ($ln -match 'Batch No\(s\)\.\s*:\s+(.*)') {
-                            $devBatch = $matches[1].Trim()
+                            $devBatch = _canon $matches[1].Trim() 'Batch'
                         } elseif ($ln -match 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)') {
-                            $devCart = $matches[1].Trim()
+                            $devCart = _canon $matches[1].Trim() 'Cartridge'
                         }
                     }
                     if ($devPart) {
@@ -3785,17 +3820,17 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
             # Dokumentnummer (inkl. attachment), Rev och Effective för Worksheet
             if ($headerWs) {
-                $doc = $headerWs.DocumentNumber
-                if ($doc) {
-                    # klipp av svans som ibland limmas ihop i headern
-                    $doc = ($doc -replace 'Document Number:\s+(.*)', '').Trim()
+                $docCanon = _canon $headerWs.DocumentNumber 'Doc'
+                $revCanon = _canon $headerWs.Rev            'REV'
+                $effCanon = _canon $headerWs.Effective      'EFF'
+
+                if ($headerWs.Attachment -and $docCanon -and ($docCanon -notmatch '(?i)\bAttachment\s+\w+\b')) {
+                    $docCanon = "$docCanon Attachment $($headerWs.Attachment)"
                 }
-                if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) {
-                    $doc = "$doc Attachment $($headerWs.Attachment)"
-                }
-                $wsInfo.Cells["B$rowDoc"].Value = $doc
-                $wsInfo.Cells["B$rowRev"].Value = $headerWs.Rev
-                $wsInfo.Cells["B$rowEff"].Value = $headerWs.Effective
+
+                $wsInfo.Cells["B$rowDoc"].Value = $docCanon
+                $wsInfo.Cells["B$rowRev"].Value = $revCanon
+                $wsInfo.Cells["B$rowEff"].Value = $effCanon
             } else {
                 $wsInfo.Cells["B$rowDoc"].Value = ''
                 $wsInfo.Cells["B$rowRev"].Value = ''
@@ -3810,12 +3845,13 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
             # Seal Test POS metadata
             if ($headerPos) {
-                # POS: ta bort ev. "Rev/Effective" som följt med
-                $docPos = $headerPos.DocumentNumber
-                if ($docPos) { $docPos = ($docPos -replace 'Document Number:\s+(.*)','').Trim() }
+                $docPos = _canon $headerPos.DocumentNumber 'Doc'
+                $revPos = _canon $headerPos.Rev            'REV'
+                $effPos = _canon $headerPos.Effective      'EFF'
+
                 $wsInfo.Cells["B$rowPosDoc"].Value = $docPos
-                $wsInfo.Cells["B$rowPosRev"].Value = $headerPos.Rev
-                $wsInfo.Cells["B$rowPosEff"].Value = $headerPos.Effective
+                $wsInfo.Cells["B$rowPosRev"].Value = $revPos
+                $wsInfo.Cells["B$rowPosEff"].Value = $effPos
             } else {
                 $wsInfo.Cells["B$rowPosDoc"].Value = ''
                 $wsInfo.Cells["B$rowPosRev"].Value = ''
@@ -3830,12 +3866,13 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
             # Seal Test NEG metadata
             if ($headerNeg) {
-                # NEG: ta bort ev. "Rev/Effective" som följt med
-                $docNeg = $headerNeg.DocumentNumber
-                if ($docNeg) { $docNeg = ($docNeg -replace 'Document Number:\s+(.*)','').Trim() }
+                $docNeg = _canon $headerNeg.DocumentNumber 'Doc'
+                $revNeg = _canon $headerNeg.Rev            'REV'
+                $effNeg = _canon $headerNeg.Effective      'EFF'
+
                 $wsInfo.Cells["B$rowNegDoc"].Value = $docNeg
-                $wsInfo.Cells["B$rowNegRev"].Value = $headerNeg.Rev
-                $wsInfo.Cells["B$rowNegEff"].Value = $headerNeg.Effective
+                $wsInfo.Cells["B$rowNegRev"].Value = $revNeg
+                $wsInfo.Cells["B$rowNegEff"].Value = $effNeg
             } else {
                 $wsInfo.Cells["B$rowNegDoc"].Value = ''
                 $wsInfo.Cells["B$rowNegRev"].Value = ''
