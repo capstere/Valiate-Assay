@@ -208,16 +208,6 @@ function Add-ShortcutItem {
     $it = New-Object System.Windows.Forms.ToolStripMenuItem($Text)
     $it.Tag = $Target
 
-    # Ta bort ikonlogik – behåll övrig funktionalitet
-    # Om du vill lägga till ikoner senare, kan du återaktivera nedan:
-    # if ($Target -match '^(?i)https?://') { $it.Image = New-GlyphIcon -Kind 'link' }
-    # elseif (Test-Path -LiteralPath $Target) {
-    #     try {
-    #         $gi = Get-Item -LiteralPath $Target -ErrorAction Stop
-    #         $it.Image = if ($gi.PSIsContainer) { New-GlyphIcon -Kind 'folder' } else { New-GlyphIcon -Kind 'file' }
-    #     } catch { $it.Image = $null }
-    # }
-
     $it.add_Click({
         param($s,$e)
         $t = [string]$s.Tag
@@ -322,8 +312,8 @@ $miArkiv.DropDownItems.AddRange(@(
 
 # ----- Verktyg -----
 $miScript1   = New-Object System.Windows.Forms.ToolStripMenuItem('📜 Kontrollprovsfil PQC 2025')
-$miScript2   = New-Object System.Windows.Forms.ToolStripMenuItem('TBA 📜 Kontrollprovsfil PQC 2026)')
-$miScript3   = New-Object System.Windows.Forms.ToolStripMenuItem('TBD 📅 Ändra "Actual Start Date" för filer')
+$miScript2   = New-Object System.Windows.Forms.ToolStripMenuItem('TBD 📜 Kontrollprovsfil PQC 2026)')
+$miScript3   = New-Object System.Windows.Forms.ToolStripMenuItem('TBD 📅 Ändra datum-prefix för filnamn')
 $miToggleSign = New-Object System.Windows.Forms.ToolStripMenuItem('✅ Aktivera Seal Test-signatur')
 $miVerktyg.DropDownItems.AddRange(@(
     $miScript1,
@@ -386,7 +376,7 @@ $picLogo.Dock='Left'; $picLogo.Width=50; $picLogo.BorderStyle='FixedSingle'
 if(Test-Path $ikonSokvag){ $picLogo.Image=[System.Drawing.Image]::FromFile($ikonSokvag); $picLogo.SizeMode='Zoom' }
 
 $lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text="BETA $ScriptVersion - verktyg vid dokumentation"
+$lblTitle.Text="BETA $ScriptVersion - verktyg vid dokumentation. WS - header fungerar inte för alla worksheet än"
 $lblTitle.ForeColor=[System.Drawing.Color]::White
 $lblTitle.Font = New-Object System.Drawing.Font('Segoe UI Semibold',13)
 $lblTitle.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
@@ -865,17 +855,6 @@ if (-not (Get-Variable -Name GXINF_Map -Scope Script -ErrorAction SilentlyContin
         'Infinity-V'    = '839032'
     }
 }
-if (-not (Get-Command Get-InstrumentMap -ErrorAction SilentlyContinue)) {
-    function Get-InstrumentMap {
-        # returns hashtable number->type
-        $map = @{}
-        foreach ($k in $script:GXINF_Map.Keys) {
-            $vals = ($script:GXINF_Map[$k] + '') -split ',' | ForEach-Object { ($_ + '').Trim() } | Where-Object { $_ }
-            foreach ($v in $vals) { if (-not $map.ContainsKey($v)) { $map[$v] = $k } }
-        }
-        return $map
-    }
-}
 
 function Import-CsvRows { param([string]$Path,[int]$StartRow=10)
     if (-not (Test-Path -LiteralPath $Path)) { return @() }
@@ -1002,47 +981,6 @@ function Get-CsvStats {
     return [pscustomobject]$out
 }
 
-# === Infinity SP (endast CSV, C/G från rad 10) – BEGIN PATCH ===
-
-if (-not (Get-Command Compress-SP10Strict -ErrorAction SilentlyContinue)) {
-    function Compress-SP10Strict {
-        param([int[]]$Points)
-        if (-not $Points -or $Points.Count -eq 0) { return '—' }
-        $uniq = $Points | Sort-Object -Unique
-
-        $segments = New-Object System.Collections.Generic.List[string]
-        $start = $uniq[0]; $prev = $uniq[0]; $count = 1
-        for ($i=1; $i -lt $uniq.Count; $i++) {
-            $curr = $uniq[$i]
-            if ($curr -eq ($prev + 1)) { $prev = $curr; $count++ }
-            else {
-                if ($count -ge 3) { $segments.Add(('SP{0:00}-{1:00}' -f $start, $prev)) }
-                elseif ($count -eq 2) { $segments.Add(('SP{0:00}' -f $start)); $segments.Add(('SP{0:00}' -f $prev)) }
-                else { $segments.Add(('SP{0:00}' -f $start)) }
-                $start = $curr; $prev = $curr; $count = 1
-            }
-        }
-        if ($count -ge 3) { $segments.Add(('SP{0:00}-{1:00}' -f $start, $prev)) }
-        elseif ($count -eq 2) { $segments.Add(('SP{0:00}' -f $start)); $segments.Add(('SP{0:00}' -f $prev)) }
-        else { $segments.Add(('SP{0:00}' -f $start)) }
-
-        return ($segments -join '+')
-    }
-}
-
-# Fallback om ConvertTo-CsvFields INTE finns i v40.1 (annars ignoreras denna)
-if (-not (Get-Command ConvertTo-CsvFields -ErrorAction SilentlyContinue)) {
-    function ConvertTo-CsvFields {
-        param([string]$Line)
-        # Enkel och tålig split som hanterar "..." runt fält samt , eller ; som delimiter
-        $delim = if (($Line -split ';').Count -gt ($Line -split ',').Count) { ';' } else { ',' }
-        $re = '((?:"(?:[^"]|"")*"|[^' + [regex]::Escape($delim) + ']*)' + [regex]::Escape($delim) + '|.+$)'
-        $raw = [regex]::Matches($Line + $delim, $re) | ForEach-Object { $_.Groups[1].Value }
-        $raw = $raw | ForEach-Object { $_.Substring(0, $_.Length - 1) } # ta bort trailing delimiter
-        return $raw
-    }
-}
-
 function Format-SpPresenceGrandTotalStrict {
     param([hashtable]$Counts)
 
@@ -1163,26 +1101,8 @@ function Get-InfinitySpFromCsvStrict {
          }
 
     if ($counts.Count -eq 0) { return '—' }
-
-    # Ny utskrift: endast SP-närvaro komprimerad + totalantal
     return (Format-SpPresenceGrandTotalStrict -Counts $counts)
  }
-
-
-function Set-InfoByLabel {
-    param([OfficeOpenXml.ExcelWorksheet]$Ws,[string]$Label,[string]$Value)
-    if (-not $Ws -or -not $Ws.Dimension) { return $false }
-    $rMax = [Math]::Min($Ws.Dimension.End.Row, 200)
-    for ($r=1; $r -le $rMax; $r++) {
-        $t = (($Ws.Cells[$r,1].Text) + '').Trim()
-        if ($t -eq $Label) {
-            $Ws.Cells[$r,2].Style.Numberformat.Format = '@'
-            $Ws.Cells[$r,2].Value = $Value
-            return $true
-        }
-    }
-    return $false
-}
 
 # === Assay-mappning → Control-flik ===
 function Normalize-Assay { param([string]$s)
@@ -1322,22 +1242,22 @@ if (-not $right) { $right = Normalize-HeaderText ((($ws.HeaderFooter.EvenHeader.
 
             # --- HÖGER: Part / Batch / Cartridge ---
             if (-not $result.PartNo)  {
-                if     ($right -match 'Part No\.\s*:\s+(.*)') { $result.PartNo  = $matches[1] }
-                elseif ($left  -match 'Part No\.\s*:\s+(.*)') { $result.PartNo  = $matches[1] } # fallback
+                if     ($right -match '(?i)\bPart\s*(?:No|Number)\.?:?\s*(\d{3}-\d{4})\b') { $result.PartNo  = $matches[1] }
+                elseif ($left  -match '(?i)\bPart\s*(?:No|Number)\.?:?\s*(\d{3}-\d{4})\b') { $result.PartNo  = $matches[1] } # fallback
             }
 
             if (-not $result.BatchNo) {
-                if     ($right -match 'Batch No\(s\)\.\s*:\s+(.*)') { $result.BatchNo = $matches[1] }
-                elseif ($left  -match 'Batch No\(s\)\.\s*:\s+(.*)') { $result.BatchNo = $matches[1] } # fallback
+                if     ($right -match '(?i)\bBatch\s*(?:No|Number)(?:\(s\))?\.?:?\s*(\d{10})\b') { $result.BatchNo = $matches[1] }
+                elseif ($left  -match '(?i)\bBatch\s*(?:No|Number)(?:\(s\))?\.?:?\s*(\d{10})\b') { $result.BatchNo = $matches[1] } # fallback
             }
 
             if (-not $result.CartridgeNo) {
                 # Hämta labelns värde, extrahera sedan ren 5-siffrig LSP
-                if ($right -match 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)') {
+                if ($right -match '(?i)\bCartridge\s*(?:No|Number)?(?:\s*\(LSP\))?\.?:?\s*([A-Za-z0-9\-\._\/ ]+)') {
                     $tmp = $matches[1].Trim()
                     $m = [regex]::Match($tmp,'(?<!\d)(\d{5})(?!\d)')
                     if ($m.Success) { $result.CartridgeNo = $m.Groups[1].Value }
-                } elseif ($left -match 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)') {
+                } elseif ($left -match '(?i)\bCartridge\s*(?:No|Number)?(?:\s*\(LSP\))?\.?:?\s*([A-Za-z0-9\-\._\/ ]+)') {
                     $tmp = $matches[1].Trim()
                     $m = [regex]::Match($tmp,'(?<!\d)(\d{5})(?!\d)')
                     if ($m.Success) { $result.CartridgeNo = $m.Groups[1].Value }
@@ -1347,10 +1267,10 @@ if (-not $right) { $right = Normalize-HeaderText ((($ws.HeaderFooter.EvenHeader.
 
             # --- VÄNSTER: Document Number (Dxxxxx) + ev. "Attachment X" på nästa rad ---
             if (-not $result.DocumentNumber) {
-                if     ($left  -match 'Document Number:\s+(.*)') {
+                if     ($left  -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)(?:\s+Attachment\s+([A-Za-z0-9]+))?') {
                     $result.DocumentNumber = $matches[1]
                     if (-not $result.Attachment -and $matches[2]) { $result.Attachment = $matches[2] }
-                } elseif ($right -match 'Document Number:\s+(.*)') {
+                } elseif ($right -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)(?:\s+Attachment\s+([A-Za-z0-9]+))?') {
                     $result.DocumentNumber = $matches[1]
                     if (-not $result.Attachment -and $matches[2]) { $result.Attachment = $matches[2] }
                 }
@@ -1358,12 +1278,12 @@ if (-not $right) { $right = Normalize-HeaderText ((($ws.HeaderFooter.EvenHeader.
 
             # --- VÄNSTER: Rev / Effective (fallback: höger) ---
             if (-not $result.Rev) {
-                if     ($left  -match 'ReV:\s+(.*)') { $result.Rev = $matches[1] }
-                elseif ($right -match 'ReV:\s+(.*)') { $result.Rev = $matches[1] }
+                if     ($left  -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
+                elseif ($right -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
             }
             if (-not $result.Effective) {
-                if     ($left  -match 'Effective:\s+(.*)') { $result.Effective = $matches[1] }
-                elseif ($right -match 'Effective:\s+(.*)') { $result.Effective = $matches[1] }
+                if     ($left  -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
+                elseif ($right -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
             }
 
             if ($result.PartNo -and $result.BatchNo -and $result.CartridgeNo -and
@@ -1392,12 +1312,12 @@ if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)
         param([OfficeOpenXml.ExcelPackage]$Pkg)
 
         # --- etikettmönster för cell-sök ---
-        $rxPart      = 'Part No\.\s*:\s+(.*)'
-        $rxBatch     = 'Batch No\(s\)\.\s*:\s+(.*)'
-        $rxCartridge = 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)'
-        $rxDoc       = 'Document Number:\s+(.*)'
-        $rxRev       = 'ReV:\s+(.*)'
-        $rxEff       = 'Effective:\s+(.*)'
+        $rxPart      = '(?i)^\s*Part\s*(?:No|Number)\.?\s*(?:\(s\))?\s*$'
+        $rxBatch     = '(?i)^\s*Batch\s*(?:No|Number)(?:\s*\(s\))?\.?\s*$'
+        $rxCartridge = '(?i)^\s*Cartridge\s*(?:No|Number)?\s*(?:\(?LSP\)?)?\.?\s*$'
+        $rxDoc       = '(?i)^\s*Document\s*(?:No|Number|#)\s*$'
+        $rxRev       = '(?i)^\s*Rev(?:ision)?\.?\s*$'
+        $rxEff       = '(?i)^\s*Effective(?:\s*Date)?\s*$'
 
         function Get-HeaderFooterText([Object]$ws) {
             $left  = Normalize-HeaderText ((($ws.HeaderFooter.OddHeader.LeftAlignedText  + '') -replace '\r?\n',' '))
@@ -1414,35 +1334,35 @@ if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)
 
             switch ($kind) {
                 'Part' {
-                    if     ($right -match 'Part No\.\s*:\s+(.*)') { $val=$matches[1]; $has=$true }
-                    elseif ($left  -match 'Part No\.\s*:\s+(.*)') { $val=$matches[1]; $has=$true }
+                    if     ($right -match '(?i)\bPart\s*(?:No|Number)\b[^0-9]*(\d{3}-\d{4})') { $val=$matches[1]; $has=$true }
+                    elseif ($left  -match '(?i)\bPart\s*(?:No|Number)\b[^0-9]*(\d{3}-\d{4})') { $val=$matches[1]; $has=$true }
                 }
                 'Batch' {
-                    if     ($right -match 'Batch No\(s\)\.\s*:\s+(.*)') { $val=$matches[1]; $has=$true }
-                    elseif ($left  -match 'Batch No\(s\)\.\s*:\s+(.*)') { $val=$matches[1]; $has=$true }
+                    if     ($right -match '(?i)\bBatch\s*(?:No|Number|No\(s\)|Number\(s\))\b[^0-9]*(\d{10})') { $val=$matches[1]; $has=$true }
+                    elseif ($left  -match '(?i)\bBatch\s*(?:No|Number|No\(s\)|Number\(s\))\b[^0-9]*(\d{10})') { $val=$matches[1]; $has=$true }
                     else {
                         # markera att etikett fanns om ordet Batch dyker upp
                         if ($right -match '(?i)\bBatch\b' -or $left -match '(?i)\bBatch\b') { $has=$true }
                     }
                 }
                 'Cartridge' {
-                    if     ($right -match 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)') {
+                    if     ($right -match '(?i)\bCartridge\b[^\r\n]*') {
                         $has=$true; $m=[regex]::Match($matches[0],'(?<!\d)(\d{5})(?!\d)'); if($m.Success){$val=$m.Groups[1].Value}
                     } elseif ($left -match '(?i)\bCartridge\b[^\r\n]*') {
                         $has=$true; $m=[regex]::Match($matches[0],'(?<!\d)(\d{5})(?!\d)'); if($m.Success){$val=$m.Groups[1].Value}
                     }
                 }
                 'Doc' {
-                    if     ($left  -match 'Document Number:\s+(.*)') { $val=$matches[1]; $has=$true }
-                    elseif ($right -match 'Document Number:\s+(.*)') { $val=$matches[1]; $has=$true }
+                    if     ($left  -match '(?i)\bDocument\s*(?:No|Number|#)\b[^\r\n]*(D\d+)') { $val=$matches[1]; $has=$true }
+                    elseif ($right -match '(?i)\bDocument\s*(?:No|Number|#)\b[^\r\n]*(D\d+)') { $val=$matches[1]; $has=$true }
                 }
                 'REV' {
-                    if     ($left  -match 'ReV:\s+(.*)') { $val=$matches[1]; $has=$true }
-                    elseif ($right -match 'ReV:\s+(.*)') { $val=$matches[1]; $has=$true }
+                    if     ($left  -match '(?i)\bRev(?:ision)?\b[^\r\n]*([A-Z]{1,3}(?:\.\d+)?)') { $val=$matches[1]; $has=$true }
+                    elseif ($right -match '(?i)\bRev(?:ision)?\b[^\r\n]*([A-Z]{1,3}(?:\.\d+)?)') { $val=$matches[1]; $has=$true }
                 }
 'EFF' {
     # Markera att etikett finns om "Effective" eller "Effective Date" förekommer
-    if ($left -match 'Effective:\s+(.*)' -or $right -match 'Effective:\s+(.*)') { $has = $true }
+    if ($left -match '(?i)\bEffective(\s*Date)?\b' -or $right -match '(?i)\bEffective(\s*Date)?\b') { $has = $true }
     foreach ($src in @($left,$right)) {
         $dt = $null
         if (Try-Parse-HeaderDate $src ([ref]$dt)) { $val = $dt.ToString('yyyy-MM-dd'); break }
@@ -1536,53 +1456,21 @@ if (-not (Get-Command Compare-WorksheetHeaderSet -ErrorAction SilentlyContinue))
 
 function _canon([string]$raw, [string]$type) {
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-
     $txt = Normalize-HeaderText $raw
-
-    switch ($type) {
-        'Part' {
-            $m = [regex]::Match($txt, '(?<!\d)(\d{3}-\d{4})(?!\d)')
-            if ($m.Success) { return $m.Groups[1].Value }
-            return $txt
-        }
-        'Batch' {
-            $matchesList = [regex]::Matches($txt, '(?<!\d)(\d{10})(?!\d)')
-            if ($matchesList.Count -gt 0) {
-                $nums = @()
-                foreach ($m in $matchesList) { $nums += $m.Groups[1].Value }
-                return ($nums -join ', ')
-            }
-            return $txt
-        }
-        'Cartridge' {
-            $m = [regex]::Match($txt, '(?<!\d)(\d{5})(?!\d)')
-            if ($m.Success) { return $m.Groups[1].Value }
-            return $txt
-        }
-        'Doc' {
-            $m = [regex]::Match($txt, '(?i)(D\d{5})')
-            if ($m.Success) { return $m.Groups[1].Value.ToUpper() }
-            return $txt
-        }
-        'REV' {
-            $m = [regex]::Match($txt, '(?i)\b([A-Z]{1,2}(?:\.\d)?)\b')
-            if ($m.Success) { return $m.Groups[1].Value.ToUpper() }
-            return $txt
-        }
-        'EFF' {
-            $dt = $null
-            if (Try-Parse-HeaderDate $txt ([ref]$dt)) {
-                return $dt.ToString('yyyy-MM-dd')
-            }
-            $m = [regex]::Match($txt, '\b(\d{1,2}/\d{1,2}/\d{4})\b')
-            if ($m.Success) { return $m.Groups[1].Value }
-            return $txt
-        }
-        default {
-            return $txt
-        }
-    }
+            switch ($type) {
+                'Part'      { $m=[regex]::Match($txt,'(?i)\b(\d{3}-\d{4})\b'); return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Batch'     { $m=[regex]::Match($txt,'(?<!\d)(\d{10})(?!\d)');  return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Cartridge' { $m=[regex]::Match($txt,'(?<!\d)(\d{5})(?!\d)');   return $(if($m.Success){$m.Groups[1].Value}else{$txt.ToUpper()}) }
+                'Doc'       { $m=[regex]::Match($txt,'(?i)\b(D\d+)\b');         return $(if($m.Success){$m.Groups[1].Value.ToUpper()}else{$txt.ToUpper()}) }
+                'REV'       { return $txt.ToUpper() }
+'EFF' {
+    $dt = $null
+    if (Try-Parse-HeaderDate $txt ([ref]$dt)) { return $dt.ToString('yyyy-MM-dd') }
+    return $txt
 }
+                default     { return $txt }
+            }
+        }
 
         $keys = @(
             @{K='PartNo';         T='Part';      Required=$true;  Label='HasPartNoLabel'    },
@@ -1659,9 +1547,9 @@ if (-not (Get-Command Extract-SealTestHeader -ErrorAction SilentlyContinue)) {
             $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim()
             if (-not $right) { $right = (($ws.HeaderFooter.EvenHeader.RightAlignedText + '') -replace '\r?\n',' ').Trim() }
 
-            if (-not $result.DocumentNumber -and $right -match 'Document Number:\s+(.*)') { $result.DocumentNumber = $matches[1] }
-            if (-not $result.Rev            -and $right -match 'ReV:\s+(.*)') { $result.Rev = $matches[1] }
-            if (-not $result.Effective      -and $right -match 'Effective:\s+(.*)') { $result.Effective = $matches[1] }
+            if (-not $result.DocumentNumber -and $right -match '(?i)\bDocument\s*(?:No|Number|#)\s*[:#]?\s*(D\d+)\b') { $result.DocumentNumber = $matches[1] }
+            if (-not $result.Rev            -and $right -match '(?i)\bRev(?:ision)?\.?\s*[:#]?\s*([A-Z]{1,3}(?:\.\d+)?)\b') { $result.Rev = $matches[1] }
+            if (-not $result.Effective      -and $right -match '(?i)\bEffective\s*[:#]?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{4}|[0-9]{4}[\/\-][0-9]{2}[\/\-][0-9]{2})') { $result.Effective = $matches[1] }
 
             if ($result.DocumentNumber -and $result.Rev -and $result.Effective) { break }
         }
@@ -1693,16 +1581,6 @@ function Normalize-HeaderText {
     # Kollapsa whitespace och trimma
     $s = ($s -replace "\s+", " ").Trim()
     return $s
-}
-
-function Normalize-HeaderValue {
-    param([object]$v)
-    if ($null -eq $v) { return '' }
-    if ($v -is [double] -or $v -is [int]) {
-        try { return ([DateTime]::FromOADate([double]$v)).ToString("yyyy-MM-dd") } catch {}
-    }
-    if ($v -is [DateTime]) { return ([DateTime]$v).ToString("yyyy-MM-dd") }
-    return (Normalize-HeaderText ([string]$v))
 }
 
 function Try-Parse-HeaderDate {
@@ -1820,95 +1698,6 @@ function Get-ConsensusValue {
     }
 
     return @{ Value=$pretty; Source=($sources -join '+'); Note=$note }
-}
-
-if (-not (Get-Command Write-HeaderReport -ErrorAction SilentlyContinue)) {
-    function Write-HeaderReport {
-        param(
-            [OfficeOpenXml.ExcelWorksheet]$Sheet,
-            [object]$WorksheetHdr,
-            [object]$PosHdr,
-            [object]$NegHdr,
-            [object]$BatchMatch,
-            [object]$SealConsistent,
-            [string]$Notes
-        )
-        if (-not $Sheet) { return }
-        $row = 1
-        if ($Sheet.Dimension) { $row = $Sheet.Dimension.End.Row + 2 }
-
-        # Worksheet avsnitt
-        $Sheet.Cells[$row,1].Value = 'Worksheet'
-        $Sheet.Cells[$row,1].Style.Font.Bold = $true
-        $row++
-        foreach ($field in @('Part No.','Batch No.','Cartridge No.','Document Number','Attachment','Rev','Effective')) {
-            $val = $null
-            switch ($field) {
-                'Part No.'        { $val = $WorksheetHdr.PartNo }
-                'Batch No.'       { $val = $WorksheetHdr.BatchNo }
-                'Cartridge No.'   { $val = $WorksheetHdr.CartridgeNo }
-                'Document Number' { $val = $WorksheetHdr.DocumentNumber }
-                'Attachment'      { $val = $WorksheetHdr.Attachment }
-                'Rev'             { $val = $WorksheetHdr.Rev }
-                'Effective'       { $val = $WorksheetHdr.Effective }
-            }
-            $Sheet.Cells[$row,1].Value = $field
-            $Sheet.Cells[$row,2].Style.Numberformat.Format = '@'
-            $Sheet.Cells[$row,2].Value = $val
-            $row++
-        }
-
-        # Seal Test POS avsnitt
-        $Sheet.Cells[$row,1].Value = 'Seal Test POS'
-        $Sheet.Cells[$row,1].Style.Font.Bold = $true
-        $row++
-        foreach ($field in @('Document Number','Rev','Effective')) {
-            $val = $null
-            switch ($field) {
-                'Document Number' { $val = $PosHdr.DocumentNumber }
-                'Rev'             { $val = $PosHdr.Rev }
-                'Effective'       { $val = $PosHdr.Effective }
-            }
-            $Sheet.Cells[$row,1].Value = $field
-            $Sheet.Cells[$row,2].Style.Numberformat.Format = '@'
-            $Sheet.Cells[$row,2].Value = $val
-            $row++
-        }
-
-        # Seal Test NEG avsnitt
-        $Sheet.Cells[$row,1].Value = 'Seal Test NEG'
-        $Sheet.Cells[$row,1].Style.Font.Bold = $true
-        $row++
-        foreach ($field in @('Document Number','Rev','Effective')) {
-            $val = $null
-            switch ($field) {
-                'Document Number' { $val = $NegHdr.DocumentNumber }
-                'Rev'             { $val = $NegHdr.Rev }
-                'Effective'       { $val = $NegHdr.Effective }
-            }
-            $Sheet.Cells[$row,1].Value = $field
-            $Sheet.Cells[$row,2].Style.Numberformat.Format = '@'
-            $Sheet.Cells[$row,2].Value = $val
-            $row++
-        }
-
-        # Checks-avsnitt
-        $Sheet.Cells[$row,1].Value = 'Checks'
-        $Sheet.Cells[$row,1].Style.Font.Bold = $true
-        $row++
-        $Sheet.Cells[$row,1].Value = 'BatchNoMatch'
-        $Sheet.Cells[$row,2].Value = if ($null -ne $BatchMatch) { $BatchMatch } else { 'N/A' }
-        $row++
-        $Sheet.Cells[$row,1].Value = 'SealTestConsistency'
-        $Sheet.Cells[$row,2].Value = if ($null -ne $SealConsistent) { $SealConsistent } else { 'N/A' }
-        $row++
-        $Sheet.Cells[$row,1].Value = 'Notes'
-        $Sheet.Cells[$row,2].Value = $Notes
-
-        try {
-            if ($Sheet.Dimension) { $Sheet.Cells[$Sheet.Dimension.Address].AutoFitColumns() | Out-Null }
-        } catch {}
-    }
 }
 
 # === GUI-utils: CheckedListBox ===
@@ -2039,15 +1828,11 @@ $miToggleSign.add_Click({
     $grpSign.Visible = -not $grpSign.Visible
     if ($grpSign.Visible) {
         $form.Height = $baseHeight + $grpSign.Height + 40
-        $miToggleSign.Text  = 'Dölj Seal Test-signatur'
-        # NY RAD: ikon = ON
-        $miToggleSign.Image = New-GlyphIcon -Kind 'toggleon'
+        $miToggleSign.Text  = '❌ Dölj Seal Test-signatur'
     }
     else {
         $form.Height = $baseHeight
-        $miToggleSign.Text  = 'Aktivera Seal Test-signatur'
-        # NY RAD: ikon = OFF
-        $miToggleSign.Image = New-GlyphIcon -Kind 'toggleoff'
+        $miToggleSign.Text  = '✅ Aktivera Seal Test-signatur'
     }
 })
 
@@ -2356,24 +2141,6 @@ function Update-BatchLink {
     }
 }
 
-# === Signatur-läsning (justerad enligt H3-regeln) ===
-function Get-SignatureList {
-    param([OfficeOpenXml.ExcelPackage]$Pkg)
-    $list = @()
-    if (-not $Pkg) { return ,@() }
-    $sheets = @($Pkg.Workbook.Worksheets | Where-Object { $_.Name -ne "Worksheet Instructions" })
-    if ($sheets.Count -le 1) { return ,@() }
-    for ($i = 1; $i -lt $sheets.Count; $i++) {
-        $ws = $sheets[$i]
-        $h3 = ($ws.Cells['H3'].Text + '').Trim()
-        if ([string]::IsNullOrWhiteSpace($h3) -or $h3 -match '^(?i)(N\/?A|NA|Tomt( innehåll)?)$') { break }
-        if ($h3 -notmatch '^[0-9]') { continue }  # endast flikar där H3 börjar med siffra
-        $sig = ($ws.Cells['B47'].Text + '').Trim()
-        if ($sig) { $list += $sig }
-    }
-    return ,$list
-}
-
 # === Sök filer-knapp ===
 $btnScan.Add_Click({
     Gui-Log '🔎 Söker filer…' -Immediate
@@ -2549,33 +2316,6 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
 
         # Låt flikens ordning bestämmas i rapportlogiken istället för att tvinga första position här.
         return $true
-    }
-}
-
-# --- WS Data-tab scanning ---
-# Den tidigare funktionen Get-WSDataFlags har tagits bort eftersom
-# extraktionen av replikerade namn från worksheet data-flikar inte längre används.
-
-# Skriv en lista lodrätt i en given kolumn från angiven startrad
-if (-not (Get-Command Write-ListToColumn -ErrorAction SilentlyContinue)) {
-    function Write-ListToColumn {
-        param(
-            [OfficeOpenXml.ExcelWorksheet]$Ws,
-            [string]$ColumnLetter,    # t.ex. 'C'
-            [int]$StartRow,           # t.ex. 8
-            [string[]]$Items
-        )
-        if (-not $Ws) { return }
-        # Töm befintlig text nedanför (rimligt spann) så vi slipper gamla rester
-        for ($r = $StartRow; $r -le ($StartRow + 200); $r++) {
-            $Ws.Cells["$ColumnLetter$r"].Value = $null
-        }
-        $row = $StartRow
-        foreach ($it in $Items) {
-            $Ws.Cells["$ColumnLetter$row"].Style.Numberformat.Format = '@'
-            $Ws.Cells["$ColumnLetter$row"].Value = $it
-            $row++
-        }
     }
 }
 
@@ -3066,52 +2806,7 @@ try {
             return $null
         }
     }
-    if (-not (Get-Command Find-ExactLabelRightOf -ErrorAction SilentlyContinue)) {
-        function Find-ExactLabelRightOf {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string]$Label,[int]$MaxRows=200,[int]$MaxCols=40)
-            if (-not $Ws -or -not $Ws.Dimension) { return $null }
-            $rx = [regex]::new('(?i)^\s*' + [regex]::Escape($Label) + '\s*$')
-            $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
-            if ($hit -and $hit.Col -lt [Math]::Min($Ws.Dimension.End.Column, $MaxCols)) {
-                return ($Ws.Cells[$hit.Row, $hit.Col+1].Text + '').Trim()
-            }
-            return $null
-        }
-    }
-    if (-not (Get-Command Find-HeaderRowCols -ErrorAction SilentlyContinue)) {
-        function Find-HeaderRowCols {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[string[]]$Need,[int]$ScanRows=80,[int]$MaxCols=40)
-            if (-not $Ws -or -not $Ws.Dimension) { return $null }
-            $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
-            for ($r=1; $r -le [Math]::Min($Ws.Dimension.End.Row, $ScanRows); $r++) {
-                $map=@{}; $found=0
-                for ($c=1; $c -le $cMax; $c++) {
-                    $h = (($Ws.Cells[$r,$c].Text) + '').Trim()
-                    if (-not $h) { continue }
-                    foreach ($n in $Need) {
-                        if ($map.ContainsKey($n)) { continue }
-                        if ($h -match ('(?i)^\s*' + [regex]::Escape($n) + '\s*$')) { $map[$n]=$c; $found++ }
-                    }
-                }
-                if ($found -eq $Need.Count) { return @{Row=$r;Map=$map} }
-            }
-            return $null
-        }
-    }
-    if (-not (Get-Command Normalize-DateString -ErrorAction SilentlyContinue)) {
-        function Normalize-DateString {
-            param([object]$Val)
-            if ($Val -is [datetime]) { return ([datetime]$Val).ToString('yyyy-MM-dd') }
-            $t = ($Val + '').Trim()
-            if (-not $t) { return $null }
-            $m = [regex]::Match($t, '\b\d{4}[- ]?\d{2}[- ]?\d{2}\b')
-            if ($m.Success) {
-                $s = $m.Value.Replace(' ','-')
-                try { return ([datetime]::Parse($s)).ToString('yyyy-MM-dd') } catch { return $s }
-            }
-            try { return ([datetime]::Parse($t)).ToString('yyyy-MM-dd') } catch { return $null }
-        }
-    }
+
     if (-not (Get-Command Get-SealHeaderDocInfo -ErrorAction SilentlyContinue)) {
         function Get-SealHeaderDocInfo {
             param([OfficeOpenXml.ExcelPackage]$Pkg)
@@ -3123,7 +2818,7 @@ try {
                 $lt = ($ws.HeaderFooter.OddHeader.LeftAlignedText + '').Trim()
                 if (-not $lt) { $lt = ($ws.HeaderFooter.EvenHeader.LeftAlignedText + '').Trim() }
                 $result.Raw = $lt
-                $rx = [regex]'Document Number:\s+(.*)'
+                $rx = [regex]'(?i)(?:document\s*(?:no|nr|#|number)\s*[:#]?\s*([A-Z0-9\-_\.\/]+))?.*?(?:rev(?:ision)?\.?\s*[:#]?\s*([A-Z0-9\-_\.]+))?'
                 $m = $rx.Match($lt)
                 if ($m.Success) {
                     if ($m.Groups[1].Value) { $result.DocNo = $m.Groups[1].Value.Trim() }
@@ -3578,7 +3273,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                         if (-not $headerWs -or -not $headerWs.PartNo) {
                             $val = $null
                             $labels = @(
-                                'Part No.: ', 'Part No.:', 'Part No:  ', 'Part Number', 'Part Number:', 'Part Number.', 'Part Number.:'
+                                'Part No.', 'Part No.:', 'Part No', 'Part Number', 'Part Number:', 'Part Number.', 'Part Number.:'
                             )
                             foreach ($lbl in $labels) {
                                 $val = Find-LabelValueRightward -Ws $wsLsp -Label $lbl
@@ -3590,7 +3285,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                         if (-not $headerWs -or -not $headerWs.BatchNo) {
                             $val = $null
                             $labels = @(
-                                'Batch No(s).:', 'Batch No(s).:  ', 'Batch No(s).: ', 'Batch No(s).:   ',
+                                'Batch No(s)', 'Batch No(s).', 'Batch No(s):', 'Batch No(s).:',
                                 'Batch No', 'Batch No.', 'Batch No:', 'Batch No.:' ,
                                 'Batch Number', 'Batch Number.', 'Batch Number:', 'Batch Number.:'
                             )
@@ -3606,7 +3301,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                             $val = $null
                             # Först, prova exakta etiketter med olika kolon/blankstegsvariationer
                             $labels = @(
-                                'Cartridge No. (LSP): ', 'Cartridge No. (LSP):  ', 'Cartridge No. (LSP):   ',
+                                'Cartridge No. (LSP)', 'Cartridge No. (LSP):', 'Cartridge No. (LSP) :',
                                 'Cartridge No (LSP)', 'Cartridge No (LSP):', 'Cartridge No (LSP) :',
                                 'Cartridge Number (LSP)', 'Cartridge Number (LSP):', 'Cartridge Number (LSP) :',
                                 'Cartridge No.', 'Cartridge No.:', 'Cartridge No. :', 'Cartridge No :',
@@ -3634,7 +3329,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                             if ($val) { $headerWs.CartridgeNo = $val }
                         }
                         if (-not $headerWs -or -not $headerWs.Effective) {
-                            $val = Find-LabelValueRightward -Ws $wsLsp -Label 'Effective:'
+                            $val = Find-LabelValueRightward -Ws $wsLsp -Label 'Effective'
                             if (-not $val) { $val = Find-LabelValueRightward -Ws $wsLsp -Label 'Effective Date' }
                             if ($val) { $headerWs.Effective = $val }
                         }
@@ -3661,7 +3356,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                     $tmpPkg3 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selPos))
                     $wsPos   = $tmpPkg3.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
                     if ($wsPos) {
-                        $val = Find-LabelValueRightward -Ws $wsPos -Label 'Effective:'
+                        $val = Find-LabelValueRightward -Ws $wsPos -Label 'Effective'
                         if (-not $val) { $val = Find-LabelValueRightward -Ws $wsPos -Label 'Effective Date' }
                         if ($val) { $headerPos.Effective = $val }
                     }
@@ -3673,7 +3368,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                     $tmpPkg4 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selNeg))
                     $wsNeg   = $tmpPkg4.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
                     if ($wsNeg) {
-                        $val = Find-LabelValueRightward -Ws $wsNeg -Label 'Effective:'
+                        $val = Find-LabelValueRightward -Ws $wsNeg -Label 'Effective'
                         if (-not $val) { $val = Find-LabelValueRightward -Ws $wsNeg -Label 'Effective Date' }
                         if ($val) { $headerNeg.Effective = $val }
                     }
@@ -3760,13 +3455,9 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
 
             # Skriv ut konsensusvärden enligt ny layout
-            $partOut  = if ($consPart.Value)  { _canon $consPart.Value  'Part'      } else { $null }
-            $batchOut = if ($consBatch.Value) { _canon $consBatch.Value 'Batch'     } else { $null }
-            $cartOut  = if ($consCart.Value)  { _canon $consCart.Value  'Cartridge' } else { $null }
-
-            if ($partOut)  { $wsInfo.Cells["B$rowPart"].Value  = $partOut  } else { $wsInfo.Cells["B$rowPart"].Value  = '' }
-            if ($batchOut) { $wsInfo.Cells["B$rowBatch"].Value = $batchOut } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
-            if ($cartOut)  { $wsInfo.Cells["B$rowCart"].Value  = $cartOut  } else { $wsInfo.Cells["B$rowCart"].Value  = '' }
+            if ($consPart.Value)  { $wsInfo.Cells["B$rowPart"].Value = $consPart.Value }  else { $wsInfo.Cells["B$rowPart"].Value = '' }
+            if ($consBatch.Value) { $wsInfo.Cells["B$rowBatch"].Value = $consBatch.Value } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
+            if ($consCart.Value)  { $wsInfo.Cells["B$rowCart"].Value = $consCart.Value }  else { $wsInfo.Cells["B$rowCart"].Value = '' }
 
             # Bestäm om batch-mismatch ska visas som notering
             $batchMismatch = $false
@@ -3794,12 +3485,12 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                     $devBatch = $null
                     $devCart  = $null
                     foreach ($ln in $linesDev) {
-                        if ($ln -match 'Part No\.\s*:\s+(.*)') {
-                            $devPart = _canon $matches[1].Trim() 'Part'
-                        } elseif ($ln -match 'Batch No\(s\)\.\s*:\s+(.*)') {
-                            $devBatch = _canon $matches[1].Trim() 'Batch'
-                        } elseif ($ln -match 'Cartridge No\.\s*\(LSP\)\s*:\s+(.*)') {
-                            $devCart = _canon $matches[1].Trim() 'Cartridge'
+                        if ($ln -match '^-\s*PartNo[^:]*:\s*(.+)$') {
+                            $devPart = $matches[1].Trim()
+                        } elseif ($ln -match '^-\s*BatchNo[^:]*:\s*(.+)$') {
+                            $devBatch = $matches[1].Trim()
+                        } elseif ($ln -match '^-\s*CartridgeNo[^:]*:\s*(.+)$') {
+                            $devCart = $matches[1].Trim()
                         }
                     }
                     if ($devPart) {
@@ -3820,17 +3511,17 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
             # Dokumentnummer (inkl. attachment), Rev och Effective för Worksheet
             if ($headerWs) {
-                $docCanon = _canon $headerWs.DocumentNumber 'Doc'
-                $revCanon = _canon $headerWs.Rev            'REV'
-                $effCanon = _canon $headerWs.Effective      'EFF'
-
-                if ($headerWs.Attachment -and $docCanon -and ($docCanon -notmatch '(?i)\bAttachment\s+\w+\b')) {
-                    $docCanon = "$docCanon Attachment $($headerWs.Attachment)"
+                $doc = $headerWs.DocumentNumber
+                if ($doc) {
+                    # klipp av svans som ibland limmas ihop i headern
+                    $doc = ($doc -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim()
                 }
-
-                $wsInfo.Cells["B$rowDoc"].Value = $docCanon
-                $wsInfo.Cells["B$rowRev"].Value = $revCanon
-                $wsInfo.Cells["B$rowEff"].Value = $effCanon
+                if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) {
+                    $doc = "$doc Attachment $($headerWs.Attachment)"
+                }
+                $wsInfo.Cells["B$rowDoc"].Value = $doc
+                $wsInfo.Cells["B$rowRev"].Value = $headerWs.Rev
+                $wsInfo.Cells["B$rowEff"].Value = $headerWs.Effective
             } else {
                 $wsInfo.Cells["B$rowDoc"].Value = ''
                 $wsInfo.Cells["B$rowRev"].Value = ''
@@ -3845,13 +3536,12 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
             # Seal Test POS metadata
             if ($headerPos) {
-                $docPos = _canon $headerPos.DocumentNumber 'Doc'
-                $revPos = _canon $headerPos.Rev            'REV'
-                $effPos = _canon $headerPos.Effective      'EFF'
-
+                # POS: ta bort ev. "Rev/Effective" som följt med
+                $docPos = $headerPos.DocumentNumber
+                if ($docPos) { $docPos = ($docPos -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
                 $wsInfo.Cells["B$rowPosDoc"].Value = $docPos
-                $wsInfo.Cells["B$rowPosRev"].Value = $revPos
-                $wsInfo.Cells["B$rowPosEff"].Value = $effPos
+                $wsInfo.Cells["B$rowPosRev"].Value = $headerPos.Rev
+                $wsInfo.Cells["B$rowPosEff"].Value = $headerPos.Effective
             } else {
                 $wsInfo.Cells["B$rowPosDoc"].Value = ''
                 $wsInfo.Cells["B$rowPosRev"].Value = ''
@@ -3866,13 +3556,12 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
             # Seal Test NEG metadata
             if ($headerNeg) {
-                $docNeg = _canon $headerNeg.DocumentNumber 'Doc'
-                $revNeg = _canon $headerNeg.Rev            'REV'
-                $effNeg = _canon $headerNeg.Effective      'EFF'
-
+                # NEG: ta bort ev. "Rev/Effective" som följt med
+                $docNeg = $headerNeg.DocumentNumber
+                if ($docNeg) { $docNeg = ($docNeg -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
                 $wsInfo.Cells["B$rowNegDoc"].Value = $docNeg
-                $wsInfo.Cells["B$rowNegRev"].Value = $revNeg
-                $wsInfo.Cells["B$rowNegEff"].Value = $effNeg
+                $wsInfo.Cells["B$rowNegRev"].Value = $headerNeg.Rev
+                $wsInfo.Cells["B$rowNegEff"].Value = $headerNeg.Effective
             } else {
                 $wsInfo.Cells["B$rowNegDoc"].Value = ''
                 $wsInfo.Cells["B$rowNegRev"].Value = ''
