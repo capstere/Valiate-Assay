@@ -52,7 +52,7 @@ try {
 Import-Module PnP.PowerShell -ErrorAction Stop
 } catch {
     try {
-        Write-Host "PnP ej hittad – installerar (kan ta någon minut)…"
+        Gui-Log "ℹ️ PnP.PowerShell-modulen saknas, installerar modulen..." 'Info'
         Install-Module PnP.PowerShell -MaximumVersion 1.12.0 -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
         Update-Splash "Laddar PnP.PowerShell…"
 Import-Module PnP.PowerShell -ErrorAction Stop
@@ -62,9 +62,9 @@ Import-Module PnP.PowerShell -ErrorAction Stop
 }
 
 $env:PNPPOWERSHELL_UPDATECHECK = "Off"
-$global:SP_ClientId   = "INSERT MYSELF"
+$global:SP_ClientId   = "Insert Myself"
 $global:SP_Tenant     = "danaher.onmicrosoft.com"
-$global:SP_CertBase64 = "INSERT MYSELF"
+$global:SP_CertBase64 = "Insert Myself"
 $global:SP_SiteUrl    = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management"
 
 if (-not $global:SpError) {
@@ -101,7 +101,7 @@ $SlangAssayPath     = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER
 $OtherScriptPath = ''
 
 $Script1Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Kontrollprovsfil 2025\Script Raw Data\Kontrollprovsfil_EPPlus_2025.ps1'
-$Script2Path  = ''
+$Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\rename-GUI.ps1'
 $Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\rename_CLI.ps1'
 
 # === Centraliserad konfiguration ===
@@ -140,50 +140,6 @@ $SharePointBatchLinkTemplate = 'https://danaher.sharepoint.com/sites/CEP-Sweden-
 $DevLogDir = Join-Path $PSScriptRoot 'Loggar'
 if (-not (Test-Path $DevLogDir)) { New-Item -ItemType Directory -Path $DevLogDir -Force | Out-Null }
 $global:LogPath = Join-Path $DevLogDir ("$($env:USERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt")
-
-function New-GlyphIcon {
-    param(
-        [ValidateSet('folder','search','report','tools','settings','help','info','open','exit','toggleon','toggleoff')]
-        [string]$Kind,[int]$Size=20,[string]$Stroke='#34495E',[single]$PenW=1.8
-    )
-    $bmp = New-Object System.Drawing.Bitmap $Size,$Size,([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $g=[System.Drawing.Graphics]::FromImage($bmp); $g.SmoothingMode='AntiAlias'; $g.Clear([System.Drawing.Color]::Transparent)
-    $pen=New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml($Stroke)),$PenW
-    $cx=$Size/2.0; $cy=$Size/2.0
-
-    switch($Kind){
-        'search' { $r=$Size*.32; $g.DrawEllipse($pen,$cx-$r,$cy-$r,2*$r,2*$r); $p1=New-Object Drawing.PointF ([single]($cx+$r*.7)),([single]($cy+$r*.7)); $p2=New-Object Drawing.PointF ([single]($p1.X+$Size*.22)),([single]($p1.Y+$Size*.22)); $g.DrawLine($pen,$p1,$p2) }
-        'report' { $g.DrawRectangle($pen,4,3,$Size-8,$Size-6); 6,7,11,15 | % { $g.DrawLine($pen,6,$_,$Size-10,$_)} }
-        'folder' { $g.DrawRectangle($pen,3,8,$Size-6,$Size-12); $g.DrawLine($pen,6,8,10,4); $g.DrawLine($pen,10,4,16,4); $g.DrawLine($pen,16,4,16,8) }
-        'tools'  { $r=$Size*.18; $g.DrawArc($pen,$cx-$r,4,2*$r,2*$r,200,220); $g.DrawLine($pen,$cx,$Size*.18,$Size-5,$Size-5); $g.DrawEllipse($pen,$Size-7,$Size-7,3,3) }
-        'settings' { $y=[int]$cy; $g.DrawLine($pen,3,$y,$Size-3,$y); $g.DrawEllipse($pen,$cx-4,$y-4,8,8) }
-        'help'   { $g.DrawEllipse($pen,3,3,$Size-6,$Size-6); $g.DrawCurve($pen,@( (New-Object Drawing.PointF ([single]($cx-3)),([single]($cy-2))), (New-Object Drawing.PointF ([single]$cx),([single]($cy-5))), (New-Object Drawing.PointF ([single]($cx+3)),([single]($cy-2))) )); $g.DrawLine($pen,$cx,$cy,$cx,$cy+4) }
-        'info'   { $g.DrawEllipse($pen,3,3,$Size-6,$Size-6); $g.DrawLine($pen,$cx,$cy-2,$cx,$cy+5); $g.DrawEllipse($pen,$cx-0.8,$cy-6.8,1.6,1.6) }
-        'open'   { $g.DrawRectangle($pen,4,6,$Size-12,$Size-10); $g.DrawLine($pen,$Size-8,$cy,$Size-4,$cy); $g.DrawLine($pen,$Size-7,$cy-3,$Size-4,$cy); $g.DrawLine($pen,$Size-7,$cy+3,$Size-4,$cy) }
-        'exit'   { $m=5; $g.DrawLine($pen,$m,$m,$Size-$m,$Size-$m); $g.DrawLine($pen,$Size-$m,$m,$m,$Size-$m) }
-
-        # --- toggle-off / toggle-on ---
-        'toggleoff' {
-            $r= [single]($Size*0.38)
-            $rect = New-Object Drawing.RectangleF ([single]($cx-$r)),([single]($cy-6)),([single](2*$r)),([single]12)
-            $g.DrawArc($pen,$rect.X,$rect.Y,12,12,90,180)
-            $g.DrawArc($pen,$rect.X+$rect.Width-12,$rect.Y,12,12,270,180)
-            $g.DrawLine($pen,$rect.X+6,$rect.Y,$rect.X+$rect.Width-6,$rect.Y)
-            $g.DrawLine($pen,$rect.X+6,$rect.Y+$rect.Height,$rect.X+$rect.Width-6,$rect.Y+$rect.Height)
-            $g.DrawEllipse($pen,$rect.X+2,$cy-4,8,8)
-        }
-        'toggleon' {
-            $r= [single]($Size*0.38)
-            $rect = New-Object Drawing.RectangleF ([single]($cx-$r)),([single]($cy-6)),([single](2*$r)),([single]12)
-            $g.DrawArc($pen,$rect.X,$rect.Y,12,12,90,180)
-            $g.DrawArc($pen,$rect.X+$rect.Width-12,$rect.Y,12,12,270,180)
-            $g.DrawLine($pen,$rect.X+6,$rect.Y,$rect.X+$rect.Width-6,$rect.Y)
-            $g.DrawLine($pen,$rect.X+6,$rect.Y+$rect.Height,$rect.X+$rect.Width-6,$rect.Y+$rect.Height)
-            $g.DrawEllipse($pen,$rect.X+$rect.Width-10,$cy-4,8,8)
-        }
-    }
-    $pen.Dispose(); $g.Dispose(); return $bmp
-}
 
 # === Genvägar (meny) ===
 function Add-ShortcutItem {
@@ -299,7 +255,7 @@ $miArkiv.DropDownItems.AddRange(@(
 
 # ----- Verktyg -----
 $miScript1   = New-Object System.Windows.Forms.ToolStripMenuItem('📜 Kontrollprovsfilskript')
-$miScript2   = New-Object System.Windows.Forms.ToolStripMenuItem('❌ TBD')
+$miScript2   = New-Object System.Windows.Forms.ToolStripMenuItem('📅 Ändra datum-prefix för filnamn GUI')
 $miScript3   = New-Object System.Windows.Forms.ToolStripMenuItem('📅 Ändra datum-prefix för filnamn')
 $miToggleSign = New-Object System.Windows.Forms.ToolStripMenuItem('✅ Aktivera Seal Test-signatur')
 $miVerktyg.DropDownItems.AddRange(@(
@@ -600,7 +556,6 @@ $slBatchLink.add_Click({
 
 $status.Items.AddRange(@($slCount,$slSpacer,$slBatchLink))
 
-# ================= ToolStripContainer-layout =================
 $tsc = New-Object System.Windows.Forms.ToolStripContainer
 $tsc.Dock = 'Fill'
 $tsc.LeftToolStripPanelVisible  = $false
@@ -639,7 +594,6 @@ $form.PerformLayout()
 
 $form.AcceptButton = $btnScan
 
-# === Logg ===
 function Gui-Log {
     param(
         [string] $Text,
@@ -673,7 +627,6 @@ function Gui-Log {
     }
 }
 
-# === EPPlus ===
 function Ensure-EPPlus {
     param(
         [string] $Version = "4.5.3.3",
@@ -726,7 +679,6 @@ function Ensure-EPPlus {
             $dllCandidates = Get-ChildItem -Path (Join-Path $extractedRoot 'net45'), (Join-Path $extractedRoot 'net40') -Filter 'EPPlus.dll' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($dllCandidates) {
             try {
-                # Om lokala EPPlus.dll inte redan finns, kopiera nedladdad DLL till skriptmappen för att återanvändas nästa gång
                 if (-not (Test-Path -LiteralPath $localScriptDll)) {
                     Copy-Item -Path $dllCandidates.FullName -Destination $localScriptDll -Force -ErrorAction SilentlyContinue
                 }
@@ -735,9 +687,9 @@ function Ensure-EPPlus {
         }
         }
     } catch {
-        Write-Warning "❌ EPPlus: Kunde inte hämta EPPlus ($Version): $($_.Exception.Message)"
+    Gui-Log "❌ EPPlus: Kunde inte hämta EPPlus ($Version): $($_.Exception.Message)" 'Error'
     }
-    Write-Warning "❌ EPPlus.dll hittades inte. Installera EPPlus $Version manuellt."
+    Gui-Log "❌ EPPlus.dll hittades inte. Installera EPPlus $Version manuellt." 'Error'
     return $null
 }
 
@@ -755,7 +707,7 @@ function Load-EPPlus {
     }
 }
 
-# === Style hjälpare ===
+
 function Set-RowBorder {
     param ($ws, [int] $row, [int] $firstRow, [int] $lastRow)
     foreach ($col in 'B','C','D','E','F','G','H') {
@@ -781,7 +733,6 @@ function Style-Cell { param($cell,$bold,$bg,$border,$fontColor)
     if ($border) { $cell.Style.Border.Top.Style=$border; $cell.Style.Border.Bottom.Style=$border; $cell.Style.Border.Left.Style=$border; $cell.Style.Border.Right.Style=$border }
 }
 
-# Utility: test if a file is locked (opened in Excel)
 function Test-FileLocked { param([Parameter(Mandatory=$true)][string]$Path)
     try { $fs = [IO.File]::Open($Path,'Open','ReadWrite','None'); $fs.Close(); return $false } catch { return $true }
 }
@@ -815,23 +766,6 @@ function Get-AssayFromCsv { param([string]$Path,[int]$StartRow=10)
         }
     } finally { if ($tp){$tp.Close()} }
     return $null
-}
-
-# === CSV Instrument map + stats (robust PS 5.1) ===
-if (-not (Get-Variable -Name GXINF_Map -Scope Script -ErrorAction SilentlyContinue)) {
-    $script:GXINF_Map = @{
-        'Infinity-VI'   = '847922'
-        'Infinity-VIII' = '803094'
-        'GX5'           = '750210,750211,750212,750213'
-        'GX6'           = '750246,750247,750248,750249'
-        'GX1'           = '709863,709864,709865,709866'
-        'GX2'           = '709951,709952,709953,709954'
-        'GX3'           = '710084,710085,710086,710087'
-        'GX7'           = '750170,750171,750172,750213'
-        'Infinity-I'    = '802069'
-        'Infinity-III'  = '807363'
-        'Infinity-V'    = '839032'
-    }
 }
 
 function Import-CsvRows { param([string]$Path,[int]$StartRow=10)
@@ -1180,10 +1114,8 @@ if (-not (Get-Command Extract-WorksheetHeader -ErrorAction SilentlyContinue)) {
         if (-not $Pkg) { return $result }
 
         foreach ($ws in $Pkg.Workbook.Worksheets) {
-        if ($ws.Name -eq 'Worksheet Instructions' -or
-        $ws.Name -match '(?i)for reference only') {
-        continue
-        }
+    if (-not $ws.Dimension) { continue }
+    if ($ws.Name -match '(?i)for reference only') { continue }
 
             $left  = (($ws.HeaderFooter.OddHeader.LeftAlignedText  + '') -replace '\r?\n',' ')
             if (-not $left)  { $left  = (($ws.HeaderFooter.EvenHeader.LeftAlignedText  + '') -replace '\r?\n',' ') }
@@ -1314,7 +1246,6 @@ $down  = Normalize-HeaderText (""+$ws.Cells[[Math]::Min($r+1,$maxR),$c].Text)
 
 foreach ($ws in $Pkg.Workbook.Worksheets) {
     if ($ws.Name -eq 'Worksheet Instructions' -or
-        $ws.Name -eq 'Test Summary'           -or
         $ws.Name -match '(?i)for reference only') {
         continue
     }
@@ -1795,10 +1726,11 @@ $miScript2.add_Click({
         default { try { Start-Process -FilePath $p } catch { [System.Windows.Forms.MessageBox]::Show("Kunde inte öppna filen:","Skript2") | Out-Null } }
     }
 })
+
 $miScript3.add_Click({
     $p = $Script3Path
-    if ([string]::IsNullOrWhiteSpace($p)) { [System.Windows.Forms.MessageBox]::Show("Ange sökvägen till Skript3 i variabeln `$Script3Path.","Skript3") | Out-Null; return }
-    if (-not (Test-Path -LiteralPath $p)) { [System.Windows.Forms.MessageBox]::Show("Filen hittades inte:\n$Script3Path","Skript3") | Out-Null; return }
+    if ([string]::IsNullOrWhiteSpace($p)) { [System.Windows.Forms.MessageBox]::Show("...","Skript3") | Out-Null; return }
+    if (-not (Test-Path -LiteralPath $p)) { [System.Windows.Forms.MessageBox]::Show("...","Skript3") | Out-Null; return }
     $ext=[System.IO.Path]::GetExtension($p).ToLowerInvariant()
     switch ($ext) {
         '.ps1' { Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$p`"" }
@@ -1809,6 +1741,17 @@ $miScript3.add_Click({
 })
 
 $miToggleSign.add_Click({
+    $lsp = $txtLSP.Text.Trim()
+    if (-not $lsp) {
+        Gui-Log "⚠️ Ange och sök ett LSP först innan du aktiverar Seal Test-signatur." 'Warn'
+        return
+    }
+    $selNeg = Get-CheckedFilePath $clbNeg
+    $selPos = Get-CheckedFilePath $clbPos
+    if (-not $selNeg -or -not $selPos) {
+        Gui-Log "⚠️ Du måste först välja både Seal Test NEG och POS innan Seal Test-signatur kan aktiveras." 'Warn'
+        return
+    }
     $grpSign.Visible = -not $grpSign.Visible
     if ($grpSign.Visible) {
         $form.Height = $baseHeight + $grpSign.Height + 40
@@ -1820,7 +1763,6 @@ $miToggleSign.add_Click({
     }
 })
 
-# Tema
 function Set-Theme {
     param([string]$Theme)
     if ($Theme -eq 'dark') {
@@ -3162,6 +3104,14 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
                 try {
                     $tmpPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selLsp))
+
+                    $eqInfo = $null
+try {
+    $eqInfo = Get-TestSummaryEquipment -Pkg $tmpPkg
+} catch {
+    Gui-Log ("⚠️ Kunde inte extrahera utrustning från Test Summary: " + $_.Exception.Message) 'Warn'
+}
+
                     $headerWs = Extract-WorksheetHeader -Pkg $tmpPkg
 
             $wsHeaderRows  = Get-WorksheetHeaderPerSheet -Pkg $tmpPkg
