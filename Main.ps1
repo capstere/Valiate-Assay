@@ -41,11 +41,9 @@ function Close-Splash() {
 $Host.UI.RawUI.WindowTitle = "Startar…"
 Show-Splash "Laddar PnP.PowerShell…"
 
-# === SharePoint init (före WinForms) ===
 $global:SpConnected = $false
 $global:SpError     = $null
 
-# 0) NuGet + PnP-modul
 try {
     $null = Get-PackageProvider -Name "NuGet" -ForceBootstrap -ErrorAction SilentlyContinue
 } catch {}
@@ -79,7 +77,6 @@ if (-not $global:SpError) {
                           -ErrorAction Stop
         $global:SpConnected = $true
     } catch {
-        # Om inloggningen misslyckas, logga och visa felet för användaren på splash-skärmen
         $msg = "Connect-PnPOnline misslyckades: $($_.Exception.Message)"
         Update-Splash $msg
         $global:SpError = $msg
@@ -109,19 +106,16 @@ $Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scrip
 
 # === Centraliserad konfiguration ===
 $Config = [ordered]@{
-    # Källfiler (kan lämnas tomma; fylls i via GUI)
     CsvPath       = ''           # Sökväg till CSV-fil
     SealNegPath   = ''           # Sökväg till Seal Test NEG
     SealPosPath   = ''           # Sökväg till Seal Test POS
     WorksheetPath = ''           # Sökväg till LSP worksheet (Worksheet.xlsx)
 
-    # SharePoint-inställningar – används för PnP-auth. Ärvd från globala variabler för bakåtkompatibilitet
     SiteUrl      = $global:SP_SiteUrl
     Tenant       = $global:SP_Tenant
     ClientId     = $global:SP_ClientId
     Certificate  = $global:SP_CertBase64
 
-    # EPPlus – ange var lokalt DLL ska ligga och vilken version som ska hämtas om DLL saknas
     EpplusDllPath = (Join-Path $PSScriptRoot 'EPPlus.dll')
     EpplusVersion = '4.5.3.3'
 }
@@ -140,17 +134,12 @@ $script:GXINF_Map = @{
     'Infinity-V'    = '839032'
 }
 
-# === Fallback-funktioner ===
-
 # Filtrering i SharePoint. {BatchNumber} och {LSP} ersätts automatiskt.
 $SharePointBatchLinkTemplate = 'https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?viewid=6c9e53c9-a377-40c1-a154-13a13866b52b&view=7&q={BatchNumber}'
 
-# === Logg: alltid till $PSScriptRoot\Loggar ===
 $DevLogDir = Join-Path $PSScriptRoot 'Loggar'
 if (-not (Test-Path $DevLogDir)) { New-Item -ItemType Directory -Path $DevLogDir -Force | Out-Null }
 $global:LogPath = Join-Path $DevLogDir ("$($env:USERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt")
-
-# === Ikoner ===
 
 function New-GlyphIcon {
     param(
@@ -173,9 +162,8 @@ function New-GlyphIcon {
         'open'   { $g.DrawRectangle($pen,4,6,$Size-12,$Size-10); $g.DrawLine($pen,$Size-8,$cy,$Size-4,$cy); $g.DrawLine($pen,$Size-7,$cy-3,$Size-4,$cy); $g.DrawLine($pen,$Size-7,$cy+3,$Size-4,$cy) }
         'exit'   { $m=5; $g.DrawLine($pen,$m,$m,$Size-$m,$Size-$m); $g.DrawLine($pen,$Size-$m,$m,$m,$Size-$m) }
 
-        # --- Nya: toggle-off / toggle-on ---
+        # --- toggle-off / toggle-on ---
         'toggleoff' {
-            # En enkel “brytarknapp” OFF (rundad kapsling, cirkel till vänster)
             $r= [single]($Size*0.38)
             $rect = New-Object Drawing.RectangleF ([single]($cx-$r)),([single]($cy-6)),([single](2*$r)),([single]12)
             $g.DrawArc($pen,$rect.X,$rect.Y,12,12,90,180)
@@ -185,7 +173,6 @@ function New-GlyphIcon {
             $g.DrawEllipse($pen,$rect.X+2,$cy-4,8,8)
         }
         'toggleon' {
-            # Samma brytare ON (cirkel till höger)
             $r= [single]($Size*0.38)
             $rect = New-Object Drawing.RectangleF ([single]($cx-$r)),([single]($cy-6)),([single](2*$r)),([single]12)
             $g.DrawArc($pen,$rect.X,$rect.Y,12,12,90,180)
@@ -460,36 +447,30 @@ function New-ListRow {
 
 # CSV
 $lblCsv=$null;$clbCsv=$null;$btnCsvBrowse=$null
-New-ListRow -labelText 'CSV:' -lbl ([ref]$lblCsv) -clb ([ref]$clbCsv) -btn ([ref]$btnCsvBrowse)
+New-ListRow -labelText 'CSV-fil:' -lbl ([ref]$lblCsv) -clb ([ref]$clbCsv) -btn ([ref]$btnCsvBrowse)
 # NEG
 $lblNeg=$null;$clbNeg=$null;$btnNegBrowse=$null
-New-ListRow -labelText 'Seal NEG:' -lbl ([ref]$lblNeg) -clb ([ref]$clbNeg) -btn ([ref]$btnNegBrowse)
+New-ListRow -labelText 'Seal Test Neg:' -lbl ([ref]$lblNeg) -clb ([ref]$clbNeg) -btn ([ref]$btnNegBrowse)
 # POS
 $lblPos=$null;$clbPos=$null;$btnPosBrowse=$null
-New-ListRow -labelText 'Seal POS:' -lbl ([ref]$lblPos) -clb ([ref]$clbPos) -btn ([ref]$btnPosBrowse)
-# Säkerställ att vi har plats för en fjärde rad (idempotent)
+New-ListRow -labelText 'Seal Test Pos:' -lbl ([ref]$lblPos) -clb ([ref]$clbPos) -btn ([ref]$btnPosBrowse)
 try {
     if ($tlPick.RowCount -lt 4) {
         $tlPick.RowCount = 4
-        # Lägg till rad-styles upp till 4
         for ($i=$tlPick.RowStyles.Count; $i -lt 4; $i++) {
             $null = $tlPick.RowStyles.Add( (New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 78)) )
         }
-        # Höjdjustering av gruppen (samma stil som hos dig)
         $grpPick.Height = (78*4) + $grpPick.Padding.Top + $grpPick.Padding.Bottom + 15
     }
 } catch {}
 
-# Skapa kontroller (återanvänder din helper New-ListRow)
 $lblLsp = $null; $clbLsp = $null; $btnLspBrowse = $null
 New-ListRow -labelText 'Worksheet:' -lbl ([ref]$lblLsp) -clb ([ref]$clbLsp) -btn ([ref]$btnLspBrowse)
 
-# Lägg in i tabellen, radindex 3 (0-baserat: 0=CSV, 1=NEG, 2=POS, 3=WS)
 $tlPick.Controls.Add($lblLsp,  0, 3)
 $tlPick.Controls.Add($clbLsp,  1, 3)
 $tlPick.Controls.Add($btnLspBrowse, 2, 3)
 
-# Single-select i denna CheckedListBox (utan att röra ev. bef. $onExclusive)
 $clbLsp.add_ItemCheck({
     param($s,$e)
     if ($e.NewValue -eq [System.Windows.Forms.CheckState]::Checked) {
@@ -602,13 +583,13 @@ $status.ShowItemToolTips = $true
 $slCount = New-Object System.Windows.Forms.ToolStripStatusLabel; $slCount.Text='0 filer valda'; $slCount.Spring=$false
 $slSpacer= New-Object System.Windows.Forms.ToolStripStatusLabel; $slSpacer.Spring=$true
 
-# --- NYTT: klickbar SharePoint-länk ---
+# --- Klickbar SharePoint-länk ---
 $slBatchLink = New-Object System.Windows.Forms.ToolStripStatusLabel
 $slBatchLink.IsLink   = $true
 $slBatchLink.Text     = 'SharePoint: —'
 $slBatchLink.Enabled  = $false
 $slBatchLink.Tag      = $null
-$slBatchLink.ToolTipText = 'Direktlänk aktiveras när Batch# hittas i POS/NEG och inte är mismatch.'
+$slBatchLink.ToolTipText = 'Direktlänk aktiveras när Batch# hittas i filer.'
 $slBatchLink.add_Click({
     if ($this.Enabled -and $this.Tag) {
         try { Start-Process $this.Tag } catch {
@@ -656,7 +637,6 @@ $content.ResumeLayout()
 $form.ResumeLayout()
 $form.PerformLayout()
 
-# Enter = "Sök filer"
 $form.AcceptButton = $btnScan
 
 # === Logg ===
@@ -678,7 +658,6 @@ function Gui-Log {
         $outputBox.Refresh()
     }
 
-    # UI-safe uppdatering (om du i framtiden loggar från annan tråd)
     if ($outputBox.InvokeRequired) {
         $null = $outputBox.BeginInvoke([System.Windows.Forms.MethodInvoker]$append)
     } else {
@@ -686,7 +665,6 @@ function Gui-Log {
     }
 
     if ($Immediate) {
-        # Rita om direkt så texten hinner visas innan UI:t ev. fryser
         [System.Windows.Forms.Application]::DoEvents()
     }
 
@@ -874,15 +852,10 @@ function Import-CsvRows { param([string]$Path,[int]$StartRow=10)
 
 function ConvertTo-CsvFields {
     param([string]$Line)
-    # CSV-split som respekterar citat
     return [regex]::Split($Line, ',(?=(?:[^"]*"[^"]*")*[^"]*$)')
 }
 
 function Get-CsvStats {
-    <#
-      Returnerar objekt:
-      TestCount, DupCount, Duplicates[], LspValues[], LspOK, InstrumentByType (ordered)
-    #>
     param([string]$Path)
 
     $out = [ordered]@{
@@ -899,12 +872,9 @@ function Get-CsvStats {
     $lines = Get-Content -LiteralPath $Path
     if (-not $lines -or $lines.Count -lt 8) { return [pscustomobject]$out }
 
-    # Försök tolka headern från rad 8 (index 7)
     $header = ConvertTo-CsvFields $lines[7]
     $dataLines = @()
     if ($lines.Count -gt 9) { $dataLines = $lines[9..($lines.Count-1)] }
-
-    # Primär: använd headernamn om de finns
     $csv = $null
     try {
         if ($dataLines.Count -gt 0) {
@@ -912,27 +882,24 @@ function Get-CsvStats {
         }
     } catch { $csv = $null }
 
-    # Fångare
     $cartSnList = New-Object System.Collections.Generic.List[string]
     $lspList    = New-Object System.Collections.Generic.List[string]
     $instrList  = New-Object System.Collections.Generic.List[string]
 
     if ($csv) {
         foreach ($row in $csv) {
-            # Tolerant hämtning via headernamn OCH fallback på index
             $cart = $row.'Cartridge S/N'
-            $lsp  = $row.'Reagent Lot ID'  # fallback kolumn E (0-baserad index 4)
+            $lsp  = $row.'Reagent Lot ID'
             $ins  = $row.'Instrument S/N'
 
-            if (-not $cart) { try { $cart = $row.Item(3) } catch {} }  # kolumn D
-            if (-not $ins)  { try { $ins  = $row.Item(6) } catch {} }  # kolumn G
+            if (-not $cart) { try { $cart = $row.Item(3) } catch {} }
+            if (-not $ins)  { try { $ins  = $row.Item(6) } catch {} }
 
             if ($cart) { $cartSnList.Add( ($cart + '').Trim() ) }
             if ($lsp)  { $lspList.Add(  ($lsp  + '').Trim() ) }
             if ($ins)  { $instrList.Add(($ins  + '').Trim() ) }
         }
     } else {
-        # Helt utan ConvertFrom-Csv: plocka kolumn D/E/G via index
         foreach ($ln in $dataLines) {
             if (-not $ln -or -not $ln.Trim()) { continue }
             $f = ConvertTo-CsvFields $ln
@@ -943,18 +910,15 @@ function Get-CsvStats {
         }
     }
 
-    # Testcount = antal icke-tomma Cartridge S/N
     $cartSn = $cartSnList | Where-Object { $_ -and $_ -ne '' }
     $out.TestCount = @($cartSn).Count
 
-    # Dubbletter
     $dups = $cartSn | Group-Object | Where-Object { $_.Count -gt 1 }
     if ($dups) {
         $out.DupCount   = $dups.Count
         $out.Duplicates = $dups | ForEach-Object { "$($_.Name) x$($_.Count)" }
     }
 
-    # LSP (unika femsiffriga — tolerant)
     $lspClean = $lspList | ForEach-Object {
         $m = [regex]::Match($_, '(?<!\d)(\d{5})(?!\d)')
         if ($m.Success) { $m.Groups[1].Value } else { $null }
@@ -964,8 +928,6 @@ function Get-CsvStats {
         $out.LspOK = ($lspClean.Count -eq 1)
     }
 
-    # Instrument → typ
-    # Förbered lookups
     $lut = @{}
     foreach ($k in $script:GXINF_Map.Keys) {
         $codes = $script:GXINF_Map[$k].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
@@ -986,7 +948,6 @@ function Format-SpPresenceGrandTotalStrict {
 
     if (-not $Counts -or $Counts.Count -eq 0) { return '—' }
 
-    # Hämta SP som har >0 Infinity-körda test (0..10)
     $present = @(
         $Counts.GetEnumerator() |
         Where-Object { $_.Value -gt 0 } |
@@ -995,7 +956,6 @@ function Format-SpPresenceGrandTotalStrict {
     )
     if ($present.Count -eq 0) { return '—' }
 
-    # Komprimera närliggande SP: #00-05, singlar: #06
     $parts = New-Object System.Collections.Generic.List[string]
     $i = 0
     while ($i -lt $present.Count) {
@@ -1009,7 +969,6 @@ function Format-SpPresenceGrandTotalStrict {
         $i = $j
     }
 
-    # Total: summan av alla Infinity-körda test över listade SP
     $total = (
         $Counts.GetEnumerator() |
         Where-Object { $_.Value -gt 0 } |
@@ -1026,13 +985,11 @@ function Get-InfinitySpFromCsvStrict {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Path,
-        # för kompatibilitet med dina anrop
         [Alias('InfinitySerials')][string[]]$InstrumentSerials
     )
 
     if (-not (Test-Path -LiteralPath $Path)) { return '—' }
 
-    # Använd din robusta ConvertTo-CsvFields om den redan finns; annars fallback-split
     $useConvertFn = $false
     try { $useConvertFn = [bool](Get-Command ConvertTo-CsvFields -ErrorAction Stop) } catch {}
 
@@ -1044,7 +1001,6 @@ function Get-InfinitySpFromCsvStrict {
         }
     }
 
-    # Normalisera Infinity-serier (Instrument S/N)
     $serSet = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
     foreach ($s in ($InstrumentSerials | Where-Object { $_ })) { $null = $serSet.Add( ($s + '').Trim().Trim('"') ) }
     if ($serSet.Count -eq 0) { return '—' }
@@ -1052,15 +1008,12 @@ function Get-InfinitySpFromCsvStrict {
     $lines = Get-Content -LiteralPath $Path
     if (-not $lines -or $lines.Count -lt 10) { return '—' }
 
-    # *** FAST LAYOUT enligt dina regler ***
-    # header = rad 8 (index 7), data = rad 10 (index 9) och nedåt
     $headerIndex = 7
     $dataStart   = 9
 
     $hdr = if ($useConvertFn) { ConvertTo-CsvFields $lines[$headerIndex] } else { Split-CsvSmart $lines[$headerIndex] }
     $colCount = $hdr.Count
 
-    # Instrument S/N via header; fallback till G (index 6)
     $idxInstr = -1
     for ($i=0; $i -lt $colCount; $i++) {
         $h = (($hdr[$i] + '') -replace '[\uFEFF\u200B]','').Trim().ToLowerInvariant()
@@ -1068,11 +1021,9 @@ function Get-InfinitySpFromCsvStrict {
     }
     if ($idxInstr -lt 0) { $idxInstr = 6 }  # G
 
-    # Sample ID = kolumn C (index 2)
     $idxSample = 2
 
-    # Räkna replikat per SP (endast Infinity-rader)
-    $counts = @{}   # nyckel: int (0..10) där 0 motsvarar _00_, värde: antal
+    $counts = @{}
     for ($r = $dataStart; $r -lt $lines.Count; $r++) {
         $ln = $lines[$r]; if (-not $ln -or -not $ln.Trim()) { continue }
         $f = if ($useConvertFn) { ConvertTo-CsvFields $ln } else { Split-CsvSmart $ln }
@@ -1084,8 +1035,6 @@ function Get-InfinitySpFromCsvStrict {
         $sample = ($f[$idxSample] + '').Trim().Trim('"')
         if (-not $sample) { continue }
 
-        # *** Viktigt: offset-regel ***
-        # Matcha exakt _00_.._10_ i Sample ID (kolumn C)
         $m = [regex]::Match($sample, '_(\d{2})_')
          if ($m.Success) {
              $nRaw = 0
@@ -1104,7 +1053,6 @@ function Get-InfinitySpFromCsvStrict {
     return (Format-SpPresenceGrandTotalStrict -Counts $counts)
  }
 
-# === Assay-mappning → Control-flik ===
 function Normalize-Assay { param([string]$s)
     if ([string]::IsNullOrWhiteSpace($s)) { return $null }
     $x=$s.ToLowerInvariant(); $x=[regex]::Replace($x,'[^a-z0-9]+',' '); $x=$x.Trim() -replace '\s+',' '; return $x
@@ -1201,7 +1149,6 @@ function Get-MinitabMacro { param([string]$AssayName)
     return $null
 }
 
-# === Excelbladsdetaljer ===
 function Find-ObservationCol { param($ws)
     $default = 13 # M
     if (-not $ws -or -not $ws.Dimension) { return $default }
@@ -1238,7 +1185,6 @@ if (-not (Get-Command Extract-WorksheetHeader -ErrorAction SilentlyContinue)) {
         continue
         }
 
-            # Hämta rå header-text (vänster + höger)
             $left  = (($ws.HeaderFooter.OddHeader.LeftAlignedText  + '') -replace '\r?\n',' ')
             if (-not $left)  { $left  = (($ws.HeaderFooter.EvenHeader.LeftAlignedText  + '') -replace '\r?\n',' ') }
             $right = (($ws.HeaderFooter.OddHeader.RightAlignedText + '') -replace '\r?\n',' ')
@@ -1258,7 +1204,6 @@ if (-not (Get-Command Extract-WorksheetHeader -ErrorAction SilentlyContinue)) {
             if (-not $result.Effective      -and $parsed.Effective)      { $result.Effective      = $parsed.Effective }
         }
 
-        # Extra fallback: Cartridge om fortfarande null → hitta första fristående 5-siffriga talet
         if (-not $result.CartridgeNo) {
             foreach ($ws in $Pkg.Workbook.Worksheets) {
                 if ($ws.Name -eq 'Worksheet Instructions') { continue }
@@ -1279,7 +1224,6 @@ if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)
     function Get-WorksheetHeaderPerSheet {
         param([OfficeOpenXml.ExcelPackage]$Pkg)
 
-        # --- etikettmönster för cell-sök ---
         $rxPart      = '(?i)^\s*Part\s*(?:No|Number)\.?\s*(?:\(s\))?\s*$'
         $rxBatch     = '(?i)^\s*Batch\s*(?:No|Number)(?:\s*\(s\))?\.?\s*$'
         $rxCartridge = '(?i)^\s*Cartridge\s*(?:No|Number)?\s*(?:\(?LSP\)?)?\.?\s*$'
@@ -1379,8 +1323,6 @@ foreach ($ws in $Pkg.Workbook.Worksheets) {
             $part=$null; $batch=$null; $cart=$null; $doc=$null; $rev=$null; $eff=$null
 
             $lr = Get-HeaderFooterText $ws
-
-            # Header/footer först…
             $r1 = Try-FromHeaderFooter $lr 'Part';      $partLabel=$partLabel -or $r1.Has; if($r1.Val){$part=$r1.Val}
             $r2 = Try-FromHeaderFooter $lr 'Batch';     $batchLabel=$batchLabel -or $r2.Has; if($r2.Val){$batch=$r2.Val}
             $r3 = Try-FromHeaderFooter $lr 'Cartridge'; $cartLabel=$cartLabel -or $r3.Has; if($r3.Val){$cart=$r3.Val}
@@ -1388,7 +1330,6 @@ foreach ($ws in $Pkg.Workbook.Worksheets) {
             $r5 = Try-FromHeaderFooter $lr 'REV';       $revLabel=$revLabel -or $r5.Has; if($r5.Val){$rev=$r5.Val}
             $r6 = Try-FromHeaderFooter $lr 'EFF';       $effLabel=$effLabel -or $r6.Has; if($r6.Val){$eff=$r6.Val}
 
-            # …fallback: cells (om inget värde hittades eller etikett saknas)
             if(-not $part){  $c=Try-FromCells $ws $rxPart      30 20 'Part';      $partLabel=$partLabel -or $c.Has; if($c.Val){$part=$c.Val} }
             if(-not $batch){ $c=Try-FromCells $ws $rxBatch     30 20 'Batch';     $batchLabel=$batchLabel -or $c.Has; if($c.Val){$batch=$c.Val} }
             if(-not $cart){  $c=Try-FromCells $ws $rxCartridge 30 20 'Cartridge'; $cartLabel=$cartLabel -or $c.Has; if($c.Val){$cart=$c.Val} }
@@ -1463,13 +1404,11 @@ function _canon([string]$raw, [string]$type) {
                 }
             }
 
-            # Majoritet (ignorera tomma)
             $nonEmpty = $vals | Where-Object { $_.Canon }
             $useSet   = if($nonEmpty.Count -gt 0){$nonEmpty}else{$vals}
             $byVal    = $useSet | Group-Object Canon | Sort-Object Count -Descending
             $major    = if($byVal.Count -gt 0){ $byVal[0].Name } else { $null }
 
-            # Avvikare = bara blad med värde som != major
             $deviants = @()
             if($major){
                 $deviants = $vals | Where-Object { $_.Canon -and ($_.Canon -ne $major) } | Select-Object -ExpandProperty Sheet -Unique
@@ -1482,7 +1421,6 @@ function _canon([string]$raw, [string]$type) {
                 [void]$detailsLst.Add($line)
             }
 
-            # Saknas: endast där etikett finns på bladet men värdet saknas
             if($req){
                 $missingSheets = $vals | Where-Object { $_.HasLbl -and -not $_.Canon } | Select-Object -ExpandProperty Sheet -Unique
                 if($missingSheets.Count -gt 0){
@@ -1503,7 +1441,6 @@ function _canon([string]$raw, [string]$type) {
         }
     }
 }
-
 
 if (-not (Get-Command Extract-SealTestHeader -ErrorAction SilentlyContinue)) {
     function Extract-SealTestHeader {
@@ -1682,7 +1619,6 @@ function Get-ConsensusValue {
     $nPos = Normalize-Id $Pos $Type
     $nNeg = Normalize-Id $Neg $Type
 
-    # vilka källor har något värde?
     $present = @{}
     if ($nWs)  { $present['WS']  = $nWs  }
     if ($nPos) { $present['POS'] = $nPos }
@@ -1691,7 +1627,6 @@ function Get-ConsensusValue {
     $chosenNorm = $null
     $sources    = @()
 
-    # 1) Majoritet (minst två lika)
     $counts = @{}
     foreach ($k in $present.Keys) {
         $val = $present[$k]
@@ -1707,7 +1642,6 @@ function Get-ConsensusValue {
         foreach ($k in $present.Keys) { if ($present[$k] -eq $chosenNorm) { $sources += $k } }
     }
 
-    # 2) Ingen majoritet? Om exakt en av POS/NEG matchar WS ⇒ välj WS
     if (-not $chosenNorm -and $nWs) {
         $posMatch = ($nPos -and $nPos -eq $nWs)
         $negMatch = ($nNeg -and $nNeg -eq $nWs)
@@ -1719,27 +1653,23 @@ function Get-ConsensusValue {
         }
     }
 
-    # 3) POS==NEG (och WS saknas/avviker)
     if (-not $chosenNorm -and $nPos -and $nNeg -and $nPos -eq $nNeg) {
         $chosenNorm = $nPos
         $sources = @('POS','NEG')
     }
 
-    # 4) Annars välj det som finns (prioritet WS > POS > NEG)
     if (-not $chosenNorm) {
         if ($nWs)      { $chosenNorm = $nWs;  $sources = @('WS')  }
         elseif ($nPos) { $chosenNorm = $nPos; $sources = @('POS') }
         elseif ($nNeg) { $chosenNorm = $nNeg; $sources = @('NEG') }
     }
 
-    # “Pretty” original (behåll format från första källa i ordning WS>POS>NEG)
     $orig = @{ WS=$Ws; POS=$Pos; NEG=$Neg }
     $pretty = $null
     foreach ($pref in @('WS','POS','NEG')) {
         if ($present.ContainsKey($pref) -and $present[$pref] -eq $chosenNorm) { $pretty = $orig[$pref]; break }
     }
 
-    # Note-text (frivillig)
     $note = $null
     if ($sources -and $sources.Count -gt 0) {
         $note = "Consensus: " + ($sources -join '+')
@@ -1803,7 +1733,6 @@ $onExclusive = {
             if ($i -ne $_.Index -and $clb.GetItemChecked($i)) { $clb.SetItemChecked($i, $false) }
         }
     }
-    # Uppdatera efter att nya checkstaten har slagit igenom
     $clb.BeginInvoke([Action]{ Update-BuildEnabled }) | Out-Null
 }
 $clbCsv.add_ItemCheck($onExclusive)
@@ -1828,7 +1757,6 @@ $miScan.add_Click({ $btnScan.PerformClick() })
 $miBuild.add_Click({ if ($btnBuild.Enabled) { $btnBuild.PerformClick() } })
 $miExit.add_Click({ $form.Close() })
 
-# Nytt – rensa GUI
 $miNew.add_Click({ Clear-GUI })
 
 # Öppna senaste rapport
@@ -1964,11 +1892,11 @@ Snabbguide
 4. Klicka på "Skapa rapport"
 
 Excelrapport öppnas med följande flikar beroende på valda filer:
-   • Information
+   • Information för sökt LSP
    • Seal Test Info
    • STF Sum
-   • Equipment
-   • Control Material
+   • Utrustningslista
+   • Kontrollmaterial
    • SharePoint Info
 
 Tips:
@@ -1993,7 +1921,7 @@ $miFAQ.add_Click({
 Vad gör skriptet?
 
 Det skapar en excel-rapport som jämför sökt LSP för Seal Test-Filer,
-hämtar utrustningslista och rätt kontrollmaterial för sökt LSP.
+hämtar utrustningslista, rätt kontrollmaterial och SharePoint Info för sökt LSP.
 
 1) Varför ser jag inte fliken “SharePoint Info”?
    • Kryssrutan “SharePoint Info” måste vara ibockad.
@@ -2021,7 +1949,6 @@ hämtar utrustningslista och rätt kontrollmaterial för sökt LSP.
     [System.Windows.Forms.MessageBox]::Show($faq,"Vanliga frågor") | Out-Null
 })
 
-# Hjälp – enkel dialog
 $miHelpDlg.add_Click({
     $helpForm = New-Object System.Windows.Forms.Form
     $helpForm.Text = 'Skicka meddelande'
@@ -2104,13 +2031,11 @@ Tolkning:
     $res = [System.Windows.Forms.MessageBox]::Show($msg, "Bekräfta signatur", 'YesNo', 'Question')
     return ($res -eq 'Yes')
 }
-# Removed unused function Get-AnyB47
 
 function Normalize-Signature {
     param([string]$s)
     if (-not $s) { return '' }
     $x = $s.Trim().ToLowerInvariant()
-    # Komprimera whitespace och normalisera kommatecken + blanksteg
     $x = [regex]::Replace($x, '\s+', ' ')
     $x = $x -replace '\s*,\s*', ','
     return $x
@@ -2121,8 +2046,8 @@ function Get-SignatureSetForDataSheets {
     $result = [pscustomobject]@{
         RawFirst  = $null
         NormSet   = New-Object 'System.Collections.Generic.HashSet[string]'
-        Occ       = @{}  # normSign -> [List[string]] (bladnamn)
-        RawByNorm = @{}  # normSign -> representativ rå text för B47
+        Occ       = @{}
+        RawByNorm = @{} 
     }
     if (-not $Pkg) { return $result }
 
@@ -2193,7 +2118,7 @@ function Update-BatchLink {
         $slBatchLink.Text        = 'SharePoint: —'
         $slBatchLink.Enabled     = $false
         $slBatchLink.Tag         = $null
-        $slBatchLink.ToolTipText = 'Direktlänk aktiveras när Batch# hittas i POS/NEG.'
+        $slBatchLink.ToolTipText = 'Direktlänk aktiveras när Batch# hittas i sökt LSP.'
     }
 }
 
@@ -2217,8 +2142,6 @@ $btnScan.Add_Click({
     $candCsv = $files | Where-Object { $_.Extension -ieq '.csv' -and $_.Name -match $lsp } | Sort-Object LastWriteTime -Descending
     $candNeg = $files | Where-Object { $_.Name -match '(?i)Neg.*\.xls[xm]$' -and $_.Name -match $lsp } | Sort-Object LastWriteTime -Descending
     $candPos = $files | Where-Object { $_.Name -match '(?i)Pos.*\.xls[xm]$' -and $_.Name -match $lsp } | Sort-Object LastWriteTime -Descending
-    # Hitta LSP-worksheet (innehåller "worksheet" i filnamnet, matchar LSP och är en Excel-fil)
-    # LSP‑worksheet: match files containing "worksheet" and the LSP number. Accept xlsx/xlsm/xls extensions.
     $candLsp = $files | Where-Object {
         ($_.Name -match '(?i)worksheet') -and ($_.Name -match [regex]::Escape($lsp)) -and ($_.Extension -match '^(\.xlsx|\.xlsm|\.xls)$')
     } | Sort-Object LastWriteTime -Descending
@@ -2233,14 +2156,13 @@ $btnScan.Add_Click({
     if ($candPos.Count -eq 0) { Gui-Log "⚠️ Ingen Seal POS hittad." 'Warn' }
     if ($candLsp.Count -eq 0) { Gui-Log "ℹ️ Ingen LSP Worksheet hittad." 'Info' }
     Update-BuildEnabled
-    Update-BatchLink   # NYTT
+    Update-BatchLink
     } finally {
-        # valfritt
+
         Gui-Log '✅ Filer laddade'
     }
 })
 
-# === Bläddra-knappar ===
 $btnCsvBrowse.Add_Click({
     $dlg = New-Object System.Windows.Forms.OpenFileDialog
     $dlg.Filter = "CSV|*.csv|Alla filer|*.*"
@@ -2276,35 +2198,28 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
     function Write-SPSheet-Safe {
         param(
             [OfficeOpenXml.ExcelPackage]$Pkg,
-            [object]$Rows,                       # EN PSCustomObject eller en array
-            [string[]]$DesiredOrder,             # används i tabell-läge
+            [object]$Rows,                    
+            [string[]]$DesiredOrder,            
             [string]$Batch
         )
         if (-not $Pkg) { return $false }
 
-        # Tvinga alltid array
         $Rows = @($Rows)
 
-        # Skapa/ersätt flik
         $name = "SharePoint Info"
         $wsOld = $Pkg.Workbook.Worksheets[$name]
         if ($wsOld) { $Pkg.Workbook.Worksheets.Delete($wsOld) }
         $ws = $Pkg.Workbook.Worksheets.Add($name)
 
-        # Tomt?
         if ($Rows.Count -eq 0 -or $Rows[0] -eq $null) {
             $ws.Cells[1,1].Value = "No rows found (Batch=$Batch)"
-            # Flytta inte SharePoint-bladet till första position här. Ordningen sätts
-            # senare i rapportlogiken för att säkerställa att Information blir först.
             return $true
         }
 
-        # Är detta “Rubrik/Värde” (från batch-script)?
         $isKV = ($Rows[0].psobject.Properties.Name -contains 'Rubrik') -and `
                 ($Rows[0].psobject.Properties.Name -contains 'Värde')
 
         if ($isKV) {
-            # --- Nyckel/Värde-layout ---
             $ws.Cells[1,1].Value = "SharePoint Information"
             $ws.Cells[1,2].Value = ""
             $ws.Cells["A1:B1"].Merge = $true
@@ -2344,7 +2259,6 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
             try { $rng.AutoFitColumns() | Out-Null } catch {}
         }
         else {
-            # --- Tabell-layout (kolumnrubriker som "Work Center", "Order#", ...) ---
             $cols = @()
             if ($DesiredOrder) { $cols += $DesiredOrder }
             foreach ($k in $Rows[0].psobject.Properties.Name) {
@@ -2369,8 +2283,6 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
                 }
             } catch {}
         }
-
-        # Låt flikens ordning bestämmas i rapportlogiken istället för att tvinga första position här.
         return $true
     }
 }
@@ -2382,10 +2294,8 @@ if (-not (Get-Command Write-SPSheet-Safe -ErrorAction SilentlyContinue)) {
 $btnBuild.Add_Click({
     Gui-Log 'Skapar rapport…' -Immediate
     try {
-    # --- EPPlus obligatoriskt ---
     if (-not (Load-EPPlus)) { Gui-Log "❌ EPPlus kunde inte laddas – avbryter." 'Error'; return }
 
-    # --- Valda filer (CSV valfri) ---
     $selCsv = Get-CheckedFilePath $clbCsv
     $selNeg = Get-CheckedFilePath $clbNeg
     $selPos = Get-CheckedFilePath $clbPos
@@ -2399,14 +2309,12 @@ $btnBuild.Add_Click({
     Gui-Log "📄 Pos-fil: $(Split-Path $selPos -Leaf)" 'Info'
     if ($selCsv) { Gui-Log "📄 CSV: $(Split-Path $selCsv -Leaf)" 'Info' } else { Gui-Log "ℹ️ Ingen CSV vald." 'Info' }
 
-    # --- Fil-lås om vi ska skriva signatur ---
     $negWritable = $true; $posWritable = $true
     if ($chkWriteSign.Checked) {
         $negWritable = -not (Test-FileLocked $selNeg); if (-not $negWritable) { Gui-Log "🔒 NEG är låst (öppen i Excel?)." 'Warn' }
         $posWritable = -not (Test-FileLocked $selPos); if (-not $posWritable) { Gui-Log "🔒 POS är låst (öppen i Excel?)." 'Warn' }
     }
 
-    # --- Öppna NEG/POS + mall ---
     $pkgNeg = $null; $pkgPos = $null; $pkgOut = $null
     try {
         try {
@@ -2491,9 +2399,6 @@ $btnBuild.Add_Click({
         # ============================
         # === Läs avvikelser       ===
         # ============================
-        # Läs avvikelser från varje data‑blad i Seal Test NEG/POS. Detta läser in våtförluster
-        # och detekterar fail eller minusvärde när Weight Loss (kolumn K) är ≤ -2.4 eller text i L
-        # indikerar “FAIL”.
         $violationsNeg = @(); $violationsPos = @(); $failNegCount = 0; $failPosCount = 0
 
          foreach ($ws in $pkgNeg.Workbook.Worksheets) {
@@ -2526,7 +2431,7 @@ $btnBuild.Add_Click({
             for ($r = 3; $r -le 45; $r++) {
                 $valK = $ws.Cells["K$r"].Value; $textL = $ws.Cells["L$r"].Text
                 if ($valK -ne $null -and $valK -is [double]) {
-                    if ($textL -eq "FAIL" -or $valK -le -2.4) {
+                    if ($textL -eq "FAIL" -or $valK -le -3.0) {
                         $obsTxt = $ws.Cells[$r, $obsC].Text
                         $violationsPos += [PSCustomObject]@{
                             Sheet      = $ws.Name
@@ -2549,7 +2454,6 @@ $btnBuild.Add_Click({
         $wsOut1 = $pkgOut.Workbook.Worksheets["Seal Test Info"]
         if (-not $wsOut1) { Gui-Log "❌ Fliken 'Seal Test Info' saknas i mallen"; return }
 
-        # Rensa mismatch-kolumn (D3..D15)
         for ($row = 3; $row -le 15; $row++) {
             $wsOut1.Cells["D$row"].Value = $null
             try { $wsOut1.Cells["D$row"].Style.Fill.PatternType = [OfficeOpenXml.Style.ExcelFillStyle]::None } catch {}
@@ -2619,7 +2523,6 @@ $btnBuild.Add_Click({
         $wsOut1.Cells["B16"].Style.HorizontalAlignment = "Center"
 
         $maxTesters = [Math]::Max($testersNeg.Count, $testersPos.Count)
-        # Antal standardrader för testare i mallen. Höj till 11 för att rymma fler testare utan att rad  för signaturen hamnar mitt i listan.
         $initialRows = 11
         if ($maxTesters -lt $initialRows) { $wsOut1.DeleteRow(17 + $maxTesters, $initialRows - $maxTesters) }
         if ($maxTesters -gt $initialRows) {
@@ -2684,7 +2587,6 @@ $btnBuild.Add_Click({
             Gui-Log "⚠️ Mismatch: Print Full Name, Sign, and Date (NEG vs POS)"
         }
 
-        # Infoga signaturinfo (rad 32)
         function Set-MergedWrapAutoHeight {
             param([OfficeOpenXml.ExcelWorksheet]$Sheet,[int]$RowIndex,[int]$ColStart=2,[int]$ColEnd=3,[string]$Text)
             $rng = $Sheet.Cells[$RowIndex, $ColStart, $RowIndex, $ColEnd]
@@ -2704,10 +2606,6 @@ $btnBuild.Add_Click({
             } catch { $Sheet.Row($RowIndex).CustomHeight = $false }
         }
 
-        # Justera radnumret för signatursektionen dynamiskt.
-        # I mallen finns en tom rad mellan den sista testaren och raden med texten
-        # "Print Full Name, Sign, and Date", följt av raden "Neg/Pos" och därefter signaturraden.
-        # Detta innebär att signraden hamnar tre rader efter listan med testare: 17 + antal testare + 3.
         $signRow = 17 + $maxTesters + 3
         $displaySignNeg = $null; $displaySignPos = $null
         if ($signToWrite) { $displaySignNeg = $signToWrite; $displaySignPos = $signToWrite }
@@ -2835,7 +2733,6 @@ $btnBuild.Add_Click({
 # === Information-blad     ===
 # ============================
 try {
-    # -- Helpers (definieras en gång per session om de saknas) --
     if (-not (Get-Command Add-Hyperlink -ErrorAction SilentlyContinue)) {
         function Add-Hyperlink {
             param([OfficeOpenXml.ExcelRange]$Cell,[string]$Text,[string]$Url)
@@ -2885,18 +2782,12 @@ try {
         }
     }
 
-    # -- Förbered fliken "Information" --
     $wsInfo = $pkgOut.Workbook.Worksheets['Information']
     if (-not $wsInfo) {
         $wsInfo = $pkgOut.Workbook.Worksheets.Add('Information')
     }
-    # Säkerställ teckensnitt för konsekvent utseende
     try { $wsInfo.Cells.Style.Font.Name='Arial'; $wsInfo.Cells.Style.Font.Size=11 } catch {}
-
-    
-    # --- CSV-statistik och info till nya rader i Information (CSV-Info) ---
     try {
-        # Läs CSV-statistik
         $csvStats = $null
         if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
             $csvStats = Get-CsvStats -Path $selCsv
@@ -2911,7 +2802,6 @@ try {
             }
             }
 
-# --- Bygg Infinity-serialslistan ---
 $infSN = @()
 if ($script:GXINF_Map) {
     foreach ($k in $script:GXINF_Map.Keys) {
@@ -2922,7 +2812,6 @@ if ($script:GXINF_Map) {
 }
 $infSN = $infSN | Select-Object -Unique
 
-# --- Räkna SP för Infinity från CSV ---
 $infSummary = '—'
 try {
     if ($selCsv -and (Test-Path -LiteralPath $selCsv) -and $infSN.Count -gt 0) {
@@ -2935,8 +2824,6 @@ try {
 if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
     try { $csvStats = Get-CsvStats -Path $selCsv } catch {}
         }
-
-        # Beräkna dubbletter för Sample ID (rad 11)
         $dupSampleCount = 0
         $dupSampleList  = @()
         if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
@@ -2966,7 +2853,6 @@ if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
                             $dupList = @()
                             foreach ($entry in $counts.GetEnumerator()) {
                                 if ($entry.Value -gt 1) {
-                                    # Kombinera värde och antal, t.ex. "12345 x2"
                                     $dupList += ("$($entry.Key) x$($entry.Value)")
                                 }
                             }
@@ -2984,15 +2870,11 @@ if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
             "$dupSampleCount ($show)"
         } else { 'N/A' }
 
-        # Beräkna dubbletter för Cartridge S/N (rad 12)
         $dupCartText = if ($csvStats.DupCount -gt 0) {
             $show = ($csvStats.Duplicates | Select-Object -First 8) -join ', '
             "$($csvStats.DupCount) ($show)"
         } else { 'N/A' }
 
-        # ----- LSP från CSV (rad 9) -----
-        # Sammanställ unika LSP-nummer från CSV och deras antal. Om inga hittas lämnas
-        # $lspSummary tomt så att GUI-värdet används istället längre ned.
         $lspSummary = ''
         try {
             if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
@@ -3006,7 +2888,6 @@ if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
                         if ($fs.Count -gt 4) {
                             $raw = ($fs[4] + '').Trim()
                             if ($raw) {
-                                # Extrahera femsiffrigt nummer om möjligt, annars använd råtalet
                                 $mLsp = [regex]::Match($raw,'(\\d{5})')
                                 $code = if ($mLsp.Success) { $mLsp.Groups[1].Value } else { $raw }
                                 if (-not $counts.ContainsKey($code)) { $counts[$code] = 0 }
@@ -3065,27 +2946,27 @@ if ($counts.Count -gt 0) {
         $rowCsvFile    = Find-InfoRow -Ws $wsInfo -Label 'CSV'
         $rowLsp        = Find-InfoRow -Ws $wsInfo -Label 'LSP'
         $rowAntal      = Find-InfoRow -Ws $wsInfo -Label 'Antal tester'
-        # Sample ID kan förekomma endast i nya layouten
+
         $rowDupSample  = Find-InfoRow -Ws $wsInfo -Label 'Dubblett Sample ID'
         if (-not $rowDupSample) { $rowDupSample = Find-InfoRow -Ws $wsInfo -Label 'Dublett Sample ID' }
-        # Cartridge S/N – namnet kan stavas med ett eller två b
+
         $rowDupCart    = Find-InfoRow -Ws $wsInfo -Label 'Dubblett Cartridge S/N'
         if (-not $rowDupCart) { $rowDupCart = Find-InfoRow -Ws $wsInfo -Label 'Dublett Cartridge S/N' }
-        # Instrumentrad
+
         $rowInst       = Find-InfoRow -Ws $wsInfo -Label 'Använda INF/GX'
 
         $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity'
 if (-not $rowBag) { $rowBag = Find-InfoRow -Ws $wsInfo -Label 'Bag Numbers Tested Using Infinity:' }
-if (-not $rowBag) { $rowBag = 14 }  # fallback till din standardrad
+if (-not $rowBag) { $rowBag = 14 } 
 
-# --- Skriv exakt en gång till B14 (eller B$rowBag) ---
+
 $wsInfo.Cells["B$rowBag"].Style.Numberformat.Format = '@'
 $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
         if ($isNewLayout) {
-            # Nya layoutens LSP-etikett är "LSP"
+
             $rowLsp = Find-InfoRow -Ws $wsInfo -Label 'LSP'
-            # Standardrader om någon etikett saknas
+
             if (-not $rowCsvFile)   { $rowCsvFile   = 8 }
             if (-not $rowLsp)       { $rowLsp       = 9 }
             if (-not $rowAntal)     { $rowAntal     = 10 }
@@ -3095,14 +2976,13 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
         }
 
-        # Sätt värden på respektive rad (kolumn B). Nummerformat för text
         if ($selCsv) {
             $wsInfo.Cells["B$rowCsvFile"].Style.Numberformat.Format = '@'
             $wsInfo.Cells["B$rowCsvFile"].Value = (Split-Path $selCsv -Leaf)
         } else {
             $wsInfo.Cells["B$rowCsvFile"].Value = ''
         }
-        # LSP från CSV (om tillgänglig); annars använd GUI-värdet
+
         if ($lspSummary -and $lspSummary -ne '') {
             $wsInfo.Cells["B$rowLsp"].Style.Numberformat.Format = '@'
             $wsInfo.Cells["B$rowLsp"].Value = $lspSummary
@@ -3110,26 +2990,24 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             $wsInfo.Cells["B$rowLsp"].Style.Numberformat.Format = '@'
             $wsInfo.Cells["B$rowLsp"].Value = $lsp
         }
-        # Antal tester
+
         $wsInfo.Cells["B$rowAntal"].Value = $csvStats.TestCount
         $wsInfo.Cells["B$rowAntal"].Style.Numberformat.Format = '@'
         $wsInfo.Cells["B$rowAntal"].Value = "$($csvStats.TestCount)"
-        # Dubblett Sample ID (skriv endast om rad finns i mallen)
+
         if ($rowDupSample) {
             $wsInfo.Cells["B$rowDupSample"].Value = $dupSampleText
         }
-        # Dubblett Cartridge S/N
+
         if ($rowDupCart) {
             $wsInfo.Cells["B$rowDupCart"].Value = $dupCartText
         }
-        # Använda INF/GX
+
         $wsInfo.Cells["B$rowInst"].Value = $instText
-        # Bag Numbers Tested Using Infinity
     } catch {
         Gui-Log ("⚠️ CSV data-fel: " + $_.Exception.Message) 'Warn'
     }
 
-# --- Meta & källor ---
     $csvLeaf = ''
     if ($selCsv) { $csvLeaf = Split-Path $selCsv -Leaf }
     $negLeaf = Split-Path $selNeg -Leaf
@@ -3185,7 +3063,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
     $linkText = 'Ingen batch funnen'
     if ($batch) { $linkText = ("Öppna " + $batch) }
 
-    # --- Klickbar batch-länk (POS -> NEG fallback) ---
     function Get-BatchFromSealFile {
         param([string]$Path)
         if (-not (Test-Path -LiteralPath $Path)) { return $null }
@@ -3202,7 +3079,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
     if ($selPos) { $batch = Get-BatchFromSealFile $selPos }
     if (-not $batch -and $selNeg) { $batch = Get-BatchFromSealFile $selNeg }
 
-    # Skriv SharePoint-batchlänk i en fast rad (rad 34)
     $batchEsc = ''
     if ($batch) { $batchEsc = [uri]::EscapeDataString($batch) }
     $lspEsc = ''
@@ -3240,7 +3116,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
     # WS (LSP Worksheet): hitta fil och skriv in i Information-bladet
     # ----------------------------------------------------------------
     try {
-        # 1) Om GUI har clbLsp – använd den. Annars försök hitta *worksheet*.xls* bredvid POS/NEG.
         if (-not $selLsp) {
             $probeDir = $null
             if ($selPos) { $probeDir = Split-Path -Parent $selPos }
@@ -3248,12 +3123,10 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             if ($probeDir -and (Test-Path -LiteralPath $probeDir)) {
                 $cand = Get-ChildItem -LiteralPath $probeDir -File -ErrorAction SilentlyContinue |
                         Where-Object {
-                            # Filnamnet ska innehålla ordet "worksheet" (case-insensitive) och LSP-numret
                             ($_.Name -match '(?i)worksheet') -and ($_.Name -match [regex]::Escape($lsp)) -and ($_.Extension -match '^\.(xlsx|xlsm|xls)$')
                         } |
                         Sort-Object LastWriteTime -Descending | Select-Object -First 1
                 if ($cand) {
-                    # Tilldela vald LSP-worksheet till variabeln men injicera inte i bladet här.
                     $selLsp = $cand.FullName
                 }
             }
@@ -3261,7 +3134,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
         function Find-LabelValueRightward {
         $normLbl = Normalize-HeaderText $Label
-        # tillåt valfritt antal mellanslag, valfri punkt/kolon i slutet
         $pat = '^(?i)\s*' + [regex]::Escape($normLbl).Replace('\ ', '\s*') + '\s*[:\.]*\s*$'
         $rx  = [regex]::new($pat, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
     $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
@@ -3276,9 +3148,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
 
         if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
             Gui-Log ("🔎 WS hittad: " + (Split-Path $selLsp -Leaf)) 'Info'
-            # LSP-filen finns. Vi extraherar endast headern via Extract-WorksheetHeader längre ned.
-            # Tidigare logik för att extrahera och infoga Test Summary och SPC har tagits bort för att förenkla.
-            # Eventuell headerinformation från denna WS används i sammanfattningen nedan.
         } else {
             Gui-Log "ℹ️ Ingen WS-fil vald/hittad (LSP Worksheet). Hoppar över WS-extraktion." 'Info'
         }
@@ -3286,23 +3155,18 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
         Gui-Log ("⚠️ WS-block fel: " + $_.Exception.Message) 'Warn'
     }
 
-        # --- Header summary table (Worksheet & Seal Test) ---
         try {
             $headerWs  = $null
             $headerNeg = $null
             $headerPos = $null
-            # Hämta header från WS (om tillgänglig)
             if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
                 try {
                     $tmpPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selLsp))
                     $headerWs = Extract-WorksheetHeader -Pkg $tmpPkg
 
-
-            # === NYTT: Konsistenskontroll av LSP-header över ALLA flikar ===
             $wsHeaderRows  = Get-WorksheetHeaderPerSheet -Pkg $tmpPkg
             $wsHeaderCheck = Compare-WorksheetHeaderSet   -Rows $wsHeaderRows
 
-            # Logga resultat av header-kontrollen. Eventuell utskrift sker senare på specifika rader.
             try {
                 if ($wsHeaderCheck.Issues -gt 0 -and $wsHeaderCheck.Summary) {
                     Gui-Log ("Worksheet header-avvikelser: {0} – se Information!" -f $wsHeaderCheck.Summary) 'Warn'
@@ -3313,19 +3177,14 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 $tmpPkg.Dispose()
                 } catch {}
             }
-            # Hämta header från NEG/POS
             try { $headerNeg = Extract-SealTestHeader -Pkg $pkgNeg } catch {}
             try { $headerPos = Extract-SealTestHeader -Pkg $pkgPos } catch {}
 
-            # Om vissa fält i headern inte hittades via header/footer, försök att hitta dem i själva
-            # arbetsbladet genom att söka efter etiketter och hämta värdet i cellen till höger.
-            # Detta gäller för Part No., Batch No(s), Cartridge No. (LSP) och Effective.
             try {
                 if ($selLsp -and (Test-Path -LiteralPath $selLsp)) {
                     $tmpPkg2 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selLsp))
                     $wsLsp   = $tmpPkg2.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
                     if ($wsLsp) {
-                        # Försök hitta Part No. i cellerna om den saknas. Prova flera varianter inklusive kolon
                         if (-not $headerWs -or -not $headerWs.PartNo) {
                             $val = $null
                             $labels = @(
@@ -3337,7 +3196,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                             }
                             if ($val) { $headerWs.PartNo = $val }
                         }
-                        # Försök hitta Batch No(s) i cellerna. Tillåt olika stavningar och kolon
                         if (-not $headerWs -or -not $headerWs.BatchNo) {
                             $val = $null
                             $labels = @(
@@ -3351,11 +3209,8 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                             }
                             if ($val) { $headerWs.BatchNo = $val }
                         }
-                        # Försök hitta Cartridge No (LSP) i cellerna. Tillåt olika stavningar, parentes (LSP) och kolon
-                        # Om CartridgeNo saknas eller är en ensam punkt (från mall) så försöker vi hitta den
                         if (-not $headerWs -or -not $headerWs.CartridgeNo -or $headerWs.CartridgeNo -eq '.') {
                             $val = $null
-                            # Först, prova exakta etiketter med olika kolon/blankstegsvariationer
                             $labels = @(
                                 'Cartridge No. (LSP)', 'Cartridge No. (LSP):', 'Cartridge No. (LSP) :',
                                 'Cartridge No (LSP)', 'Cartridge No (LSP):', 'Cartridge No (LSP) :',
@@ -3368,14 +3223,11 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                                 $val = Find-LabelValueRightward -Ws $wsLsp -Label $lbl
                                 if ($val) { break }
                             }
-                            # Om fortfarande null, försök hitta en cell som innehåller "Cartridge" och "LSP"
                             if (-not $val) {
                                 $rxCart = [regex]::new('(?i)Cartridge.*\(LSP\)')
-                                # Sök igenom fler kolumner (upp till 100) för att hitta cellen med "Cartridge" och "(LSP)"
                                 $maxCols = [Math]::Min($wsLsp.Dimension.End.Column, 100)
                                 $hitCart = Find-RegexCell -Ws $wsLsp -Rx $rxCart -MaxRows 200 -MaxCols $maxCols
                                 if ($hitCart) {
-                                    # Leta efter första icke-tomma cellen till höger om etiketten
                                     for ($c = $hitCart.Col + 1; $c -le $wsLsp.Dimension.End.Column; $c++) {
                                         $cellVal = ($wsLsp.Cells[$hitCart.Row, $c].Text + '').Trim()
                                         if ($cellVal) { $val = $cellVal; break }
@@ -3390,12 +3242,10 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                             if ($val) { $headerWs.Effective = $val }
                         }
             }
-            # Om Cartridge No fortfarande är tomt, försök hitta första femsiffriga tal i filnamnet som fallback.
+
             try {
-                # Om CartridgeNo fortfarande saknas, är en punkt eller tom sträng, försök hämta nummer ur filnamnet.
                 if ($selLsp -and (-not $headerWs -or -not $headerWs.CartridgeNo -or $headerWs.CartridgeNo -eq '.' -or $headerWs.CartridgeNo -eq '')) {
                     $fn = Split-Path $selLsp -Leaf
-                    # Hitta första tal om 5–7 siffror som står självständigt (ej del av längre tal)
                     $m = [regex]::Matches($fn, '(?<!\d)(\d{5,7})(?!\d)')
                     if ($m.Count -gt 0) {
                         $headerWs.CartridgeNo = $m[0].Groups[1].Value
@@ -3406,7 +3256,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 }
             } catch {}
 
-            # Fyll i Effective för POS/NEG om saknas via cellbaserad sökning
             try {
                 if ($selPos -and -not $headerPos.Effective) {
                     $tmpPkg3 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selPos))
@@ -3431,7 +3280,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                     $tmpPkg4.Dispose()
                 }
             } catch {}
-            # Fastställ batcher
+
             $wsBatch   = if ($headerWs -and $headerWs.BatchNo) { $headerWs.BatchNo } else { $null }
             $sealBatch = $batch
             if (-not $sealBatch) {
@@ -3440,21 +3289,17 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             }
             $batchMatchFlag = $null
             if ($wsBatch -and $sealBatch) { $batchMatchFlag = ($wsBatch -eq $sealBatch) }
-            # Fastställ konsistens mellan POS/NEG
             $sealConsistentFlag = $null
             if ($headerNeg -and $headerPos) {
                 if ($headerNeg.DocumentNumber -and $headerPos.DocumentNumber -and $headerNeg.Rev -and $headerPos.Rev -and $headerNeg.Effective -and $headerPos.Effective) {
                     $sealConsistentFlag = (($headerNeg.DocumentNumber -eq $headerPos.DocumentNumber) -and ($headerNeg.Rev -eq $headerPos.Rev) -and ($headerNeg.Effective -eq $headerPos.Effective))
                 }
             }
-            # Sätt noteringar för oväntade Document Number
+
             $noteStr = ''
             if ($headerNeg -and $headerNeg.DocumentNumber -and $headerNeg.DocumentNumber -ne 'D10552') { $noteStr += ("NEG DocNo (" + $headerNeg.DocumentNumber + ") != D10552; ") }
             if ($headerPos -and $headerPos.DocumentNumber -and $headerPos.DocumentNumber -ne 'D10552') { $noteStr += ("POS DocNo (" + $headerPos.DocumentNumber + ") != D10552; ") }
-            # Dynamiskt hitta rader för header-information (Worksheet, POS, NEG) genom att söka efter etiketter i kolumn A.
-            # Find-InfoRow-funktionen definieras tidigare i samma event och återanvänds här.
 
-            # Worksheet‑sektion
             $rowWsFile = Find-InfoRow -Ws $wsInfo -Label 'Worksheet'
             if (-not $rowWsFile) { $rowWsFile = 17 }
             $rowPart  = $rowWsFile + 1
@@ -3464,27 +3309,22 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             $rowRev   = $rowWsFile + 5
             $rowEff   = $rowWsFile + 6
 
-            # Seal Test POS‑sektion
             $rowPosFile = Find-InfoRow -Ws $wsInfo -Label 'Seal Test POS'
             if (-not $rowPosFile) {
-                # Om ej hittad, anta fyra rader efter Worksheet‑sektionen eller använd tidigare fallback (24)
                 if ($rowWsFile) { $rowPosFile = $rowWsFile + 7 } else { $rowPosFile = 24 }
             }
             $rowPosDoc = $rowPosFile + 1
             $rowPosRev = $rowPosFile + 2
             $rowPosEff = $rowPosFile + 3
 
-            # Seal Test NEG‑sektion
             $rowNegFile = Find-InfoRow -Ws $wsInfo -Label 'Seal Test NEG'
             if (-not $rowNegFile) {
-                # Om ej hittad, anta fyra rader efter POS‑sektionen
                 $rowNegFile = $rowPosFile + 4
             }
             $rowNegDoc = $rowNegFile + 1
             $rowNegRev = $rowNegFile + 2
             $rowNegEff = $rowNegFile + 3
 
-            # Worksheet-filnamn
             if ($selLsp) {
                 $wsInfo.Cells["B$rowWsFile"].Style.Numberformat.Format = '@'
                 $wsInfo.Cells["B$rowWsFile"].Value = (Split-Path $selLsp -Leaf)
@@ -3492,12 +3332,10 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 $wsInfo.Cells["B$rowWsFile"].Value = ''
             }
  
-            # Konsensus mellan WS/POS/NEG (ändrar inte källvärden)
             $consPart  = Get-ConsensusValue -Type 'Part'      -Ws $headerWs.PartNo      -Pos $headerPos.PartNumber   -Neg $headerNeg.PartNumber
             $consBatch = Get-ConsensusValue -Type 'Batch'     -Ws $headerWs.BatchNo     -Pos $headerPos.BatchNumber  -Neg $headerNeg.BatchNumber
             $consCart  = Get-ConsensusValue -Type 'Cartridge' -Ws $headerWs.CartridgeNo -Pos $headerPos.CartridgeNo  -Neg $headerNeg.CartridgeNo
 
-            # Extra fallback för Cartridge: om konsensus saknas → försök från LSP-filnamn (5–7 siffror)
             if (-not $consCart.Value -and $selLsp) {
                 $fnCart = Split-Path $selLsp -Leaf
                 $mCart  = [regex]::Match($fnCart,'(?<!\d)(\d{5,7})(?!\d)')
@@ -3510,12 +3348,10 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 }
             }
 
-            # Skriv ut konsensusvärden enligt ny layout
             if ($consPart.Value)  { $wsInfo.Cells["B$rowPart"].Value = $consPart.Value }  else { $wsInfo.Cells["B$rowPart"].Value = '' }
             if ($consBatch.Value) { $wsInfo.Cells["B$rowBatch"].Value = $consBatch.Value } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
             if ($consCart.Value)  { $wsInfo.Cells["B$rowCart"].Value = $consCart.Value }  else { $wsInfo.Cells["B$rowCart"].Value = '' }
 
-            # Bestäm om batch-mismatch ska visas som notering
             $batchMismatch = $false
             try {
                 if ($headerNeg -and $headerPos -and $headerNeg.BatchNumber -and $headerPos.BatchNumber) {
@@ -3525,15 +3361,12 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 }
             } catch {}
 
-            # Lägg till kommentarer endast om POS/NEG batch skiljer sig
             if ($batchMismatch) {
                 try { if ($consPart.Note)  { [void]$wsInfo.Cells["B$rowPart"].AddComment($consPart.Note,  'DocMerge') } } catch {}
                 try { if ($consBatch.Note) { [void]$wsInfo.Cells["B$rowBatch"].AddComment($consBatch.Note, 'DocMerge') } } catch {}
                 try { if ($consCart.Note)  { [void]$wsInfo.Cells["B$rowCart"].AddComment($consCart.Note,  'DocMerge') } } catch {}
             }
 
-            # Fyll i header-avvikelser per fält i kolumn C (PartNo, BatchNo, CartridgeNo)
-            # Använd informationen från wsHeaderCheck.Details som returneras av Compare-WorksheetHeaderSet.
             try {
                 if ($wsHeaderCheck -and $wsHeaderCheck.Details) {
                     $linesDev = ($wsHeaderCheck.Details -split "`r?`n")
@@ -3564,12 +3397,9 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 }
             } catch {}
 
-
-            # Dokumentnummer (inkl. attachment), Rev och Effective för Worksheet
             if ($headerWs) {
                 $doc = $headerWs.DocumentNumber
                 if ($doc) {
-                    # klipp av svans som ibland limmas ihop i headern
                     $doc = ($doc -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim()
                 }
                 if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) {
@@ -3583,16 +3413,16 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 $wsInfo.Cells["B$rowRev"].Value = ''
                 $wsInfo.Cells["B$rowEff"].Value = ''
             }
-            # Seal Test POS fil
+
             if ($selPos) {
                 $wsInfo.Cells["B$rowPosFile"].Style.Numberformat.Format = '@'
                 $wsInfo.Cells["B$rowPosFile"].Value = (Split-Path $selPos -Leaf)
             } else {
                 $wsInfo.Cells["B$rowPosFile"].Value = ''
             }
-            # Seal Test POS metadata
+
             if ($headerPos) {
-                # POS: ta bort ev. "Rev/Effective" som följt med
+
                 $docPos = $headerPos.DocumentNumber
                 if ($docPos) { $docPos = ($docPos -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
                 $wsInfo.Cells["B$rowPosDoc"].Value = $docPos
@@ -3603,7 +3433,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 $wsInfo.Cells["B$rowPosRev"].Value = ''
                 $wsInfo.Cells["B$rowPosEff"].Value = ''
             }
-            # Seal Test NEG fil
+
             if ($selNeg) {
                 $wsInfo.Cells["B$rowNegFile"].Style.Numberformat.Format = '@'
                 $wsInfo.Cells["B$rowNegFile"].Value = (Split-Path $selNeg -Leaf)
@@ -3640,9 +3470,9 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 $srcPkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($UtrustningListPath))
                 $srcWs  = $srcPkg.Workbook.Worksheets[1]
                 if ($srcWs) {
-                    $wsEq = $pkgOut.Workbook.Worksheets["Equipment"]
+                    $wsEq = $pkgOut.Workbook.Worksheets["Utrustningslista"]
                     if ($wsEq) { $pkgOut.Workbook.Worksheets.Delete($wsEq) }
-                    $wsEq = $pkgOut.Workbook.Worksheets.Add('Equipment', $srcWs)
+                    $wsEq = $pkgOut.Workbook.Worksheets.Add('Utrustningslista', $srcWs)
                     if ($wsEq.Dimension) {
                         foreach ($cell in $wsEq.Cells[$wsEq.Dimension.Address]) {
                             if ($cell.Formula -or $cell.FormulaR1C1) { $val=$cell.Value; $cell.Formula=$null; $cell.FormulaR1C1=$null; $cell.Value=$val }
@@ -3653,7 +3483,7 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
                 }
                 $srcPkg.Dispose()
             } else { Gui-Log "ℹ️ Utrustningslista saknas: $UtrustningListPath" 'Info' }
-        } catch { Gui-Log "⚠️ Kunde inte kopiera 'Equipment': $($_.Exception.Message)" 'Warn' }
+        } catch { Gui-Log "⚠️ Kunde inte kopiera 'Utrustningslistan': $($_.Exception.Message)" 'Warn' }
 
         # ============================
         # === Control Material      ===
@@ -3901,9 +3731,9 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
         # === Tab-färger (innan Save)
         # ============================
         try {
-            $wsT = $pkgOut.Workbook.Worksheets['Information'];     if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 52, 152, 219) }
-            $wsT = $pkgOut.Workbook.Worksheets['Equipment'];       if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 33, 115, 70) }
-            $wsT = $pkgOut.Workbook.Worksheets['SharePoint Info']; if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 0, 120, 212) }
+            $wsT = $pkgOut.Workbook.Worksheets['Information'];            if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 52, 152, 219) }
+            $wsT = $pkgOut.Workbook.Worksheets['Utrustningslista'];       if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 33, 115, 70) }
+            $wsT = $pkgOut.Workbook.Worksheets['SharePoint Info'];        if ($wsT) { $wsT.TabColor = [System.Drawing.Color]::FromArgb(255, 0, 120, 212) }
         } catch {
             Gui-Log "⚠️ Kunde inte sätta tab-färg: $($_.Exception.Message)" 'Warn'
         }
@@ -3926,9 +3756,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             $pkgOut.Workbook.View.ActiveTab = 0
             $wsInitial = $pkgOut.Workbook.Worksheets["Information"]
             if ($wsInitial) { $wsInitial.View.TabSelected = $true }
-            # Innan vi sparar, säkerställ korrekt tabbordning med Information först.
-            # Vi avstår från att flytta flikarna vid sparning, se kommentar ovan.
-            # Spara arbetsboken efter att flikordningen har säkerställts
             $pkgOut.SaveAs($SavePath)
             Gui-Log "✅ Rapport sparad: $SavePath" 'Info'
             $global:LastReportPath = $SavePath
