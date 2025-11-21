@@ -1,11 +1,9 @@
 function Add-ShortcutItem {
     param(
-
         [System.Windows.Forms.ToolStripMenuItem]$Parent,
         [string]$Text,
         [string]$Target
     )
-
     $it = New-Object System.Windows.Forms.ToolStripMenuItem($Text)
     $it.Tag = $Target
 
