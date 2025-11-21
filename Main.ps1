@@ -547,6 +547,38 @@ function Update-BuildEnabled {
     Update-StatusBar
 }
 
+$script:LastScanResult = $null
+
+function Get-BatchLinkInfo {
+    param(
+        [string]$SealPosPath,
+        [string]$SealNegPath,
+        [string]$Lsp
+    )
+
+    $batch = $null
+    try { if ($SealPosPath) { $batch = Get-BatchNumberFromSealFile $SealPosPath } } catch {}
+    if (-not $batch) {
+        try { if ($SealNegPath) { $batch = Get-BatchNumberFromSealFile $SealNegPath } } catch {}
+    }
+
+    $batchEsc = if ($batch) { [uri]::EscapeDataString($batch) } else { '' }
+    $lspEsc   = if ($Lsp)   { [uri]::EscapeDataString($Lsp) }   else { '' }
+
+    $url = if ($SharePointBatchLinkTemplate) {
+        ($SharePointBatchLinkTemplate -replace '\{BatchNumber\}', $batchEsc) -replace '\{LSP\}', $lspEsc
+    } else {
+        "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/AllItems.aspx?view=7&q=$batchEsc"
+    }
+    $linkText = if ($batch) { "Öppna $batch" } else { 'Ingen batch funnen' }
+
+    return [pscustomobject]@{
+        Batch    = $batch
+        Url      = $url
+        LinkText = $linkText
+    }
+}
+
 function Assert-StartupReady {
     if ($global:StartupReady) { return $true }
     Gui-Log "❌ Startkontroll misslyckades. Åtgärda konfigurationsfel innan du fortsätter." 'Error'
@@ -797,6 +829,17 @@ $btnScan.Add_Click({
     $lsp = $txtLSP.Text.Trim()
     if (-not $lsp) { Gui-Log "⚠️ Ange ett LSP-nummer" 'Warn'; return }
 
+    if ($script:LastScanResult -and $script:LastScanResult.Lsp -eq $lsp -and $script:LastScanResult.Folder -and (Test-Path -LiteralPath $script:LastScanResult.Folder)) {
+        Gui-Log "♻️ Återanvänder senaste sökresultatet för $lsp." 'Info'
+        Add-CLBItems -clb $clbCsv -files $script:LastScanResult.Csv -AutoCheckFirst
+        Add-CLBItems -clb $clbNeg -files $script:LastScanResult.Neg -AutoCheckFirst
+        Add-CLBItems -clb $clbPos -files $script:LastScanResult.Pos -AutoCheckFirst
+        Add-CLBItems -clb $clbLsp -files $script:LastScanResult.LspFiles -AutoCheckFirst
+        Update-BuildEnabled
+        Update-BatchLink
+        return
+    }
+
     $folder = $null
     foreach ($path in $RootPaths) {
         $folder = Get-ChildItem $path -Directory -Recurse -ErrorAction SilentlyContinue |
@@ -824,6 +867,14 @@ $btnScan.Add_Click({
     if ($candLsp.Count -eq 0) { Gui-Log "ℹ️ Ingen LSP Worksheet hittad." 'Info' }
     Update-BuildEnabled
     Update-BatchLink
+    $script:LastScanResult = [pscustomobject]@{
+        Lsp      = $lsp
+        Folder   = $folder.FullName
+        Csv      = $candCsv  | ForEach-Object { $_.FullName }
+        Neg      = $candNeg  | ForEach-Object { $_.FullName }
+        Pos      = $candPos  | ForEach-Object { $_.FullName }
+        LspFiles = $candLsp  | ForEach-Object { $_.FullName }
+    }
     } finally {
         Gui-Log '✅ Filer laddade'
     }
@@ -1463,10 +1514,13 @@ try {
     }
     try { $wsInfo.Cells.Style.Font.Name='Arial'; $wsInfo.Cells.Style.Font.Size=11 } catch {}
     try {
+        $csvLines = $null
         $csvStats = $null
         if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
-            $csvStats = Get-CsvStats -Path $selCsv
-        } else {
+            try { $csvLines = Get-Content -LiteralPath $selCsv } catch { Gui-Log ("⚠️ Kunde inte läsa CSV: " + $_.Exception.Message) 'Warn' }
+            try { $csvStats = Get-CsvStats -Path $selCsv -Lines $csvLines } catch { Gui-Log ("⚠️ Get-CsvStats: " + $_.Exception.Message) 'Warn' }
+        }
+        if (-not $csvStats) {
             $csvStats = [pscustomobject]@{
                 TestCount    = 0
                 DupCount     = 0
@@ -1475,67 +1529,61 @@ try {
                 LspOK        = $null
                 InstrumentByType = [ordered]@{}
             }
+        }
+
+        $infSN = @()
+        if ($script:GXINF_Map) {
+            foreach ($k in $script:GXINF_Map.Keys) {
+                if ($k -like 'Infinity-*') {
+                    $infSN += ($script:GXINF_Map[$k].Split(',') | ForEach-Object { ($_ + '').Trim() } | Where-Object { $_ })
+                }
             }
-
-$infSN = @()
-if ($script:GXINF_Map) {
-    foreach ($k in $script:GXINF_Map.Keys) {
-        if ($k -like 'Infinity-*') {
-            $infSN += ($script:GXINF_Map[$k].Split(',') | ForEach-Object { ($_ + '').Trim() } | Where-Object { $_ })
         }
-    }
-}
 
-$infSN = $infSN | Select-Object -Unique
-$infSummary = '—'
+        $infSN = $infSN | Select-Object -Unique
+        $infSummary = '—'
 
-try {
-    if ($selCsv -and (Test-Path -LiteralPath $selCsv) -and $infSN.Count -gt 0) {
-        $infSummary = Get-InfinitySpFromCsvStrict -Path $selCsv -InfinitySerials $infSN
-    }
-} catch {
-    Gui-Log ("Infinity SP fel: " + $_.Exception.Message) 'Warn'
-}
-
-if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
-    try { $csvStats = Get-CsvStats -Path $selCsv } catch {}
+        try {
+            if ($selCsv -and (Test-Path -LiteralPath $selCsv) -and $infSN.Count -gt 0) {
+                $infSummary = Get-InfinitySpFromCsvStrict -Path $selCsv -InfinitySerials $infSN -Lines $csvLines
+            }
+        } catch {
+            Gui-Log ("Infinity SP fel: " + $_.Exception.Message) 'Warn'
         }
+
         $dupSampleCount = 0
         $dupSampleList  = @()
-        if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
+        if ($csvLines -and $csvLines.Count -gt 8) {
             try {
-                $csvLines = Get-Content -LiteralPath $selCsv
-                if ($csvLines.Count -gt 8) {
-                    $headerFields = ConvertTo-CsvFields $csvLines[7]
-                    $sampleIdx = -1
-                    for ($i=0; $i -lt $headerFields.Count; $i++) {
-                        $hf = ($headerFields[$i] + '').Trim().ToLower()
-                        if ($hf -match 'sample') { $sampleIdx = $i; break }
+                $headerFields = ConvertTo-CsvFields $csvLines[7]
+                $sampleIdx = -1
+                for ($i=0; $i -lt $headerFields.Count; $i++) {
+                    $hf = ($headerFields[$i] + '').Trim().ToLower()
+                    if ($hf -match 'sample') { $sampleIdx = $i; break }
+                }
+                if ($sampleIdx -ge 0) {
+                    $samples = @()
+                    for ($r=9; $r -lt $csvLines.Count; $r++) {
+                        $line = $csvLines[$r]
+                        if (-not $line -or -not $line.Trim()) { continue }
+                        $fields = ConvertTo-CsvFields $line
+                        if ($fields.Count -gt $sampleIdx) {
+                            $val = ($fields[$sampleIdx] + '').Trim()
+                            if ($val) { $samples += $val }
+                       }
                     }
-                    if ($sampleIdx -ge 0) {
-                        $samples = @()
-                        for ($r=9; $r -lt $csvLines.Count; $r++) {
-                            $line = $csvLines[$r]
-                            if (-not $line -or -not $line.Trim()) { continue }
-                            $fields = ConvertTo-CsvFields $line
-                            if ($fields.Count -gt $sampleIdx) {
-                                $val = ($fields[$sampleIdx] + '').Trim()
-                                if ($val) { $samples += $val }
-                           }
-                        }
 
-                        if ($samples.Count -gt 0) {
-                            $counts = @{}
-                            foreach ($s in $samples) { if (-not $counts.ContainsKey($s)) { $counts[$s] = 0 }; $counts[$s]++ }
-                            $dupList = @()
-                            foreach ($entry in $counts.GetEnumerator()) {
-                                if ($entry.Value -gt 1) {
-                                    $dupList += ("$($entry.Key) x$($entry.Value)")
-                                }
+                    if ($samples.Count -gt 0) {
+                        $counts = @{}
+                        foreach ($s in $samples) { if (-not $counts.ContainsKey($s)) { $counts[$s] = 0 }; $counts[$s]++ }
+                        $dupList = @()
+                        foreach ($entry in $counts.GetEnumerator()) {
+                            if ($entry.Value -gt 1) {
+                                $dupList += ("$($entry.Key) x$($entry.Value)")
                             }
-                            $dupSampleCount = $dupList.Count
-                            $dupSampleList  = $dupList
                         }
+                        $dupSampleCount = $dupList.Count
+                        $dupSampleList  = $dupList
                     }
                 }
             } catch {
@@ -1552,42 +1600,39 @@ if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
         } else { 'N/A' }
         $lspSummary = ''
         try {
-            if ($selCsv -and (Test-Path -LiteralPath $selCsv)) {
-                $csvLines2 = Get-Content -LiteralPath $selCsv
-                if ($csvLines2.Count -gt 8) {
-                    $counts = @{}
-                    for ($rr = 9; $rr -lt $csvLines2.Count; $rr++) {
-                        $ln = $csvLines2[$rr]
-                        if (-not $ln -or -not $ln.Trim()) { continue }
-                        $fs = ConvertTo-CsvFields $ln
-                        if ($fs.Count -gt 4) {
-                            $raw = ($fs[4] + '').Trim()
-                            if ($raw) {
-                                $mLsp = [regex]::Match($raw,'(\\d{5})')
-                                $code = if ($mLsp.Success) { $mLsp.Groups[1].Value } else { $raw }
-                                if (-not $counts.ContainsKey($code)) { $counts[$code] = 0 }
-                                $counts[$code]++
-                            }
+            if ($csvLines -and $csvLines.Count -gt 8) {
+                $counts = @{}
+                for ($rr = 9; $rr -lt $csvLines.Count; $rr++) {
+                    $ln = $csvLines[$rr]
+                    if (-not $ln -or -not $ln.Trim()) { continue }
+                    $fs = ConvertTo-CsvFields $ln
+                    if ($fs.Count -gt 4) {
+                        $raw = ($fs[4] + '').Trim()
+                        if ($raw) {
+                            $mLsp = [regex]::Match($raw,'(\\d{5})')
+                            $code = if ($mLsp.Success) { $mLsp.Groups[1].Value } else { $raw }
+                            if (-not $counts.ContainsKey($code)) { $counts[$code] = 0 }
+                            $counts[$code]++
                         }
                     }
+                }
 
-if ($counts.Count -gt 0) {
-    $sorted = $counts.GetEnumerator() | Sort-Object Key
-    $lspSummaryParts = @()
-    foreach ($kvp in $sorted) {
-        $part = if ($kvp.Value -gt 1) { "$($kvp.Key) x$($kvp.Value)" } else { $kvp.Key }
-        $lspSummaryParts += $part
-    }
-    $total = $sorted.Count
-    if ($total -eq 1) {
-        $lspSummary = $sorted[0].Key
-    }
-    else {
-        $lspSummary = "$total (" + ($lspSummaryParts -join ', ') + ")"
-    }
-}
-                        }
+                if ($counts.Count -gt 0) {
+                    $sorted = $counts.GetEnumerator() | Sort-Object Key
+                    $lspSummaryParts = @()
+                    foreach ($kvp in $sorted) {
+                        $part = if ($kvp.Value -gt 1) { "$($kvp.Key) x$($kvp.Value)" } else { $kvp.Key }
+                        $lspSummaryParts += $part
                     }
+                    $total = $sorted.Count
+                    if ($total -eq 1) {
+                        $lspSummary = $sorted[0].Key
+                    }
+                    else {
+                        $lspSummary = "$total (" + ($lspSummaryParts -join ', ') + ")"
+                    }
+                }
+            }
         } catch {
             Gui-Log ("⚠️ Fel vid extraktion av LSP från CSV: " + $_.Exception.Message) 'Warn'
             $lspSummary = ''
@@ -1676,10 +1721,6 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
         Gui-Log ("⚠️ CSV data-fel: " + $_.Exception.Message) 'Warn'
     }
 
-    $csvLeaf = ''
-    if ($selCsv) { $csvLeaf = Split-Path $selCsv -Leaf }
-    $negLeaf = Split-Path $selNeg -Leaf
-    $posLeaf = Split-Path $selPos -Leaf
     $assayForMacro = ''
     if ($runAssay) {
         $assayForMacro = $runAssay
@@ -1710,60 +1751,11 @@ $wsInfo.Cells["B$rowBag"].Value = $infSummary
             $selLsp = Get-CheckedFilePath $clbLsp
         }
     } catch {}
-    $batch = $null
-
-    # Få batch från POS → NEG fallback
-    try { if ($selPos) { $batch = Get-BatchFromSealFile $selPos } } catch {}
-    if (-not $batch) {
-        try { if ($selNeg) { $batch = Get-BatchFromSealFile $selNeg } } catch {}
-    }
-    $batchEsc = ''
-    if ($batch) { $batchEsc = [uri]::EscapeDataString($batch) }
-    $lspEsc = ''
-    if ($lsp) { $lspEsc = [uri]::EscapeDataString($lsp) }
-    $url = ''
-    if ($SharePointBatchLinkTemplate) {
-        $url = $SharePointBatchLinkTemplate -replace '\{BatchNumber\}', $batchEsc
-        $url = $url -replace '\{LSP\}', $lspEsc
-    } else {
-        $url = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/AllItems.aspx?view=7&q=$batchEsc"
-    }
-
-    $linkText = 'Ingen batch funnen'
-    if ($batch) { $linkText = ("Öppna " + $batch) }
-
-    function Get-BatchFromSealFile {
-        param([string]$Path)
-        if (-not (Test-Path -LiteralPath $Path)) { return $null }
-        try {
-            $p = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
-            $ws  = $p.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
-            $bn  = $null
-            if ($ws) { $bn = ($ws.Cells['D2'].Text + '').Trim() }
-            $p.Dispose()
-            return $bn
-        } catch { return $null }
-    }
-    $batch = $null
-    if ($selPos) { $batch = Get-BatchFromSealFile $selPos }
-    if (-not $batch -and $selNeg) { $batch = Get-BatchFromSealFile $selNeg }
-
-    $batchEsc = ''
-    if ($batch) { $batchEsc = [uri]::EscapeDataString($batch) }
-    $lspEsc = ''
-    if ($lsp) { $lspEsc = [uri]::EscapeDataString($lsp) }
-    $url = ''
-    if ($SharePointBatchLinkTemplate) {
-        $url = $SharePointBatchLinkTemplate -replace '\{BatchNumber\}', $batchEsc
-        $url = $url -replace '\{LSP\}', $lspEsc
-    } else {
-        $url = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/AllItems.aspx?view=7&q=$batchEsc"
-    }
-    $linkText = 'Ingen batch funnen'
-    if ($batch) { $linkText = ("Öppna " + $batch) }
+    $batchInfo = Get-BatchLinkInfo -SealPosPath $selPos -SealNegPath $selNeg -Lsp $lsp
+    $batch = $batchInfo.Batch
     $wsInfo.Cells['A34'].Value = 'SharePoint Batch'
     $wsInfo.Cells['A34'].Style.Font.Bold = $true
-    Add-Hyperlink -Cell $wsInfo.Cells['B34'] -Text $linkText -Url $url
+    Add-Hyperlink -Cell $wsInfo.Cells['B34'] -Text $batchInfo.LinkText -Url $batchInfo.Url
     $linkMap = [ordered]@{
 
         'IPT App'      = 'https://apps.powerapps.com/play/e/default-771c9c47-7f24-44dc-958e-34f8713a8394/a/fd340dbd-bbbf-470b-b043-d2af4cb62c83'
@@ -1933,34 +1925,30 @@ try {
                 }
             } catch {}
             try {
-                if ($selPos -and -not $headerPos.Effective) {
-                    $tmpPkg3 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selPos))
-                    $wsPos   = $tmpPkg3.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
+                if ($pkgPos -and -not $headerPos.Effective) {
+                    $wsPos = $pkgPos.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
                     if ($wsPos) {
                         $val = Find-LabelValueRightward -Ws $wsPos -Label 'Effective'
                         if (-not $val) { $val = Find-LabelValueRightward -Ws $wsPos -Label 'Effective Date' }
                         if ($val) { $headerPos.Effective = $val }
                     }
-                    $tmpPkg3.Dispose()
                 }
             } catch {}
             try {
-                if ($selNeg -and -not $headerNeg.Effective) {
-                    $tmpPkg4 = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($selNeg))
-                    $wsNeg   = $tmpPkg4.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
+                if ($pkgNeg -and -not $headerNeg.Effective) {
+                    $wsNeg = $pkgNeg.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
                     if ($wsNeg) {
                         $val = Find-LabelValueRightward -Ws $wsNeg -Label 'Effective'
                         if (-not $val) { $val = Find-LabelValueRightward -Ws $wsNeg -Label 'Effective Date' }
                         if ($val) { $headerNeg.Effective = $val }
                     }
-                    $tmpPkg4.Dispose()
                 }
             } catch {}
             $wsBatch   = if ($headerWs -and $headerWs.BatchNo) { $headerWs.BatchNo } else { $null }
             $sealBatch = $batch
             if (-not $sealBatch) {
-                try { $sealBatch = Get-BatchFromSealFile $selPos } catch {}
-                if (-not $sealBatch) { try { $sealBatch = Get-BatchFromSealFile $selNeg } catch {} }
+                try { if ($selPos) { $sealBatch = Get-BatchNumberFromSealFile $selPos } } catch {}
+                if (-not $sealBatch) { try { if ($selNeg) { $sealBatch = Get-BatchNumberFromSealFile $selNeg } } catch {} }
             }
             $batchMatchFlag = $null
             if ($wsBatch -and $sealBatch) { $batchMatchFlag = ($wsBatch -eq $sealBatch) }
@@ -2430,20 +2418,8 @@ try {
                     Gui-Log ("⚠️ SharePoint ej tillgängligt: $errMsg") 'Warn'
                 }
 
-                function Get-BatchFromSealFile {
-                    param([string]$Path)
-                    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-                    try {
-                        $p = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
-                        $ws  = $p.Workbook.Worksheets | Where-Object { $_.Name -ne 'Worksheet Instructions' } | Select-Object -First 1
-                        $bn  = if ($ws) { ($ws.Cells['D2'].Text + '').Trim() } else { $null }
-                        $p.Dispose()
-                        return $bn
-                    } catch { return $null }
-                }
-                $batch = $null
-                try { $batch = Get-BatchFromSealFile $selPos } catch {}
-                if (-not $batch) { try { $batch = Get-BatchFromSealFile $selNeg } catch {} }
+                $batchInfo = Get-BatchLinkInfo -SealPosPath $selPos -SealNegPath $selNeg -Lsp $lsp
+                $batch = $batchInfo.Batch
 
                 if (-not $batch) {
                     Gui-Log "ℹ️ Inget Batch # i POS/NEG – skriver tom SharePoint Info." 'Info'
@@ -2562,7 +2538,7 @@ try {
                     try {
                         if ($slBatchLink -and $batch) {
                             $slBatchLink.Text = "SharePoint: $batch"
-                            $slBatchLink.Tag  = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?viewid=6c9e53c9-a377-40c1-a154-13a13866b52b&view=7&q=$batch"
+                            $slBatchLink.Tag  = $batchInfo.Url
                             $slBatchLink.Enabled = $true
                         }
                     } catch {}
