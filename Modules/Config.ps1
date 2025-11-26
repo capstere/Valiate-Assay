@@ -2,13 +2,13 @@ param(
     [string]$ScriptRoot = (Split-Path -Parent $MyInvocation.MyCommand.Path)
 )
 
-# === Inställningar ===
+# === InstÃ¤llningar ===
 $ScriptVersion = "v45.1.0"
 
 $RootPaths = @(
     'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Tests',
-    'N:\QC\QC-1\IPT\3. IPT - KLART FÖR SAMMANSTÄLLNING',
-    'N:\QC\QC-1\IPT\4. IPT - KLART FÖR GRANSKNING'
+    'N:\QC\QC-1\IPT\3. IPT - KLART FÃ–R SAMMANSTÃ„LLNING',
+    'N:\QC\QC-1\IPT\4. IPT - KLART FÃ–R GRANSKNING'
 )
 
 $ikonSokvag = Join-Path $ScriptRoot "icon.png"
@@ -23,17 +23,17 @@ $Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scrip
 $Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\rename-GUI.bat'
 
 $env:PNPPOWERSHELL_UPDATECHECK = "Off"
-$global:SP_ClientId   = "Insert Myself"
+$global:SP_ClientId   = "INSERT MYSELF"
 $global:SP_Tenant     = "danaher.onmicrosoft.com"
-$global:SP_CertBase64 = "Insert Myself"
+$global:SP_CertBase64 = "INSERT MYSELF"
 $global:SP_SiteUrl    = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management"
 
 # === Centraliserad konfiguration ===
 $Config = [ordered]@{
-    CsvPath       = ''           # Sökväg till CSV-fil
-    SealNegPath   = ''           # Sökväg till Seal Test NEG
-    SealPosPath   = ''           # Sökväg till Seal Test POS
-    WorksheetPath = ''           # Sökväg till LSP worksheet (Worksheet.xlsx)
+    CsvPath       = ''           # SÃ¶kvÃ¤g till CSV-fil
+    SealNegPath   = ''           # SÃ¶kvÃ¤g till Seal Test NEG
+    SealPosPath   = ''           # SÃ¶kvÃ¤g till Seal Test POS
+    WorksheetPath = ''           # SÃ¶kvÃ¤g till LSP worksheet (Worksheet.xlsx)
     SiteUrl      = $global:SP_SiteUrl
     Tenant       = $global:SP_Tenant
     ClientId     = $global:SP_ClientId
