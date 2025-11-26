@@ -1510,6 +1510,7 @@ try {
 
     $wsInfo = $pkgOut.Workbook.Worksheets['Information']
     if (-not $wsInfo) { $wsInfo = $pkgOut.Workbook.Worksheets.Add('Information') }
+    try { $wsInfo.Cells.Clear() | Out-Null } catch {}
     try { $wsInfo.Cells.Style.Font.Name='Arial'; $wsInfo.Cells.Style.Font.Size=11 } catch {}
 
     $csvLines         = @()
@@ -1530,61 +1531,6 @@ try {
     $testCount    = $compilingSummary.TestCount
     $csvStats     = [pscustomobject]@{ TestCount = $testCount }
 
-    $dupSampleText = if ($compilingSummary.DuplicateSampleIDs.Count -gt 0) {
-        ($compilingSummary.DuplicateSampleIDs | ForEach-Object { "$($_.SampleId) x$($_.Count)" } | Select-Object -First 8) -join ', '
-    } else { 'N/A' }
-    $dupCartText = if ($compilingSummary.DuplicateCartridgeSN.Count -gt 0) {
-        ($compilingSummary.DuplicateCartridgeSN | ForEach-Object { "$($_.Cartridge) x$($_.Count)" } | Select-Object -First 8) -join ', '
-    } else { 'N/A' }
-
-    $controlMaterialLines = if ($compilingSummary.ControlMaterialCount.Count -gt 0) {
-        ($compilingSummary.ControlMaterialCount.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object { "$($_.Value)x $($_.Key)" })
-    } else { @('—') }
-
-    $ctLines = New-Object System.Collections.Generic.List[string]
-    foreach ($ct in ($compilingSummary.ControlTypeStats | Sort-Object { [int]($_.ControlType) })) {
-        $expected = if ($ct.ExpectedCount -ne $null) { $ct.ExpectedCount } elseif ($ct.DesignExpected -ne $null) { $ct.DesignExpected } else { 'N/A' }
-        $label    = if ($ct.Label) { " ($($ct.Label))" } else { '' }
-        $rangeTxt = ''
-        if ($ct.BagRangeText -or $ct.ReplicateRangeText) {
-            $rangeTxt = "($($ct.BagRangeText), $($ct.ReplicateRangeText))"
-        }
-        $icon = if ($ct.Ok -eq $true) { '✔' } elseif ($ct.Ok -eq $false) { '⚠' } else { '' }
-        $missingNote = if ($ct.MissingCount -gt 0) { " (saknar $($ct.MissingCount))" } else { '' }
-        $line = "_$($ct.ControlType)_$label $expected förväntade $rangeTxt → $($ct.ActualCount) hittade"
-        if ($icon) { $line += " $icon" }
-        if ($missingNote) { $line += $missingNote }
-        $ctLines.Add($line.Trim())
-    }
-    if ($ctLines.Count -eq 0) { $ctLines.Add('—') }
-
-    $missingLines = if ($compilingSummary.MissingReplicates.Count -gt 0) {
-        ($compilingSummary.MissingReplicates | Sort-Object Bag, ControlType, ReplicateNumber | ForEach-Object { "Bag {0:00}, typ _{1}_, rep {2:00}" -f $_.Bag, $_.ControlType, $_.ReplicateNumber })
-    } else { @('Inga') }
-
-    $replacementLines = if ($compilingSummary.Replacements.Count -gt 0) {
-        ($compilingSummary.Replacements | ForEach-Object { "$($_.ReplacementType): $($_.SampleId)" })
-    } else { @('Inga') }
-
-    $delamLines = if ($compilingSummary.Delaminations.Count -gt 0) {
-        @($compilingSummary.Delaminations)
-    } else { @('Inga') }
-
-    $errorLines = if ($compilingSummary.ErrorList.Count -gt 0) {
-        ($compilingSummary.ErrorList | Select-Object -First 30)
-    } else { @('Inga') }
-
-    $errorSummaryLines = @()
-    if ($compilingSummary.ErrorCodes.Keys.Count -gt 0) {
-        foreach ($k in ($compilingSummary.ErrorCodes.Keys | Sort-Object)) {
-            $vals = $compilingSummary.ErrorCodes[$k]
-            if (-not $vals) { continue }
-            $line = "$k $($vals.Count) st (" + (($vals | Select-Object -First 10) -join ', ') + ")"
-            $errorSummaryLines += $line
-        }
-    }
-    if ($errorSummaryLines.Count -eq 0) { $errorSummaryLines = @('Inga') }
-
     $assayForMacro = ''
     if ($runAssay) {
         $assayForMacro = $runAssay
@@ -1598,291 +1544,6 @@ try {
         $miniVal = Get-MinitabMacro -AssayName $assayForMacro
     }
     if (-not $miniVal) { $miniVal = 'N/A' }
-
-    $wsInfo.Cells['A1'].Value = 'Information'
-    $wsInfo.Cells['A1'].Style.Font.Bold = $true
-    $wsInfo.Cells['A1'].Style.Font.Size = 14
-
-    $labelsBlock1 = @{
-        'A2'  = 'Skriptversion'
-        'A3'  = 'Användare'
-        'A4'  = 'Datum Tid'
-        'A5'  = 'Minitab Macro'
-        'A7'  = 'CSV'
-        'A8'  = 'Assay'
-        'A9'  = 'Assay Version'
-        'A10' = 'LSP'
-        'A11' = 'Antal tester'
-    }
-    foreach ($kvp in $labelsBlock1.GetEnumerator()) {
-        $wsInfo.Cells[$kvp.Key].Value = $kvp.Value
-        $wsInfo.Cells[$kvp.Key].Style.Font.Bold = $true
-    }
-    $wsInfo.Cells['B2'].Value  = $ScriptVersion
-    $wsInfo.Cells['B3'].Value  = $env:USERNAME
-    $wsInfo.Cells['B4'].Value  = (Get-Date).ToString('yyyy-MM-dd HH:mm')
-    $wsInfo.Cells['B5'].Value  = $miniVal
-    $wsInfo.Cells['B7'].Style.Numberformat.Format = '@'
-    $wsInfo.Cells['B7'].Value  = if ($selCsv) { Split-Path $selCsv -Leaf } else { 'N/A' }
-    $wsInfo.Cells['B8'].Value  = $assayName
-    $wsInfo.Cells['B9'].Value  = $assayVersion
-    $wsInfo.Cells['B10'].Style.Numberformat.Format = '@'
-    $wsInfo.Cells['B10'].Value = if ($lspSummary) { $lspSummary } else { $lsp }
-    $wsInfo.Cells['B11'].Value = $testCount
-
-    # Insert a compiling summary header and dynamic table instead of static multi-line lists.
-    $wsInfo.Cells['A13'].Value = 'IPT-Compiling – automatiska kontroller (stöd, ersätter inte WS)'
-    $wsInfo.Cells['A13'].Style.Font.Bold = $true
-    
-    # Helper function: join a list of items into a string, limiting the number shown.
-    function Join-LimitedText {
-        param(
-            [object[]]$Items,
-            [int]$Max = 6
-        )
-        if (-not $Items -or $Items.Count -eq 0) { return '' }
-        $arr = @($Items)
-        if ($arr.Count -gt $Max) {
-            $shown = $arr[0..($Max-1)]
-            $rest  = $arr.Count - $shown.Count
-            return (($shown -join '; ') + " (+$rest till)")
-        }
-        return ($arr -join '; ')
-    }
-
-    # Helper function: set header row text and styling.
-    function Set-InfoHeaderRow {
-        param(
-            [int]$Row,
-            [int]$FromCol,
-            [int]$ToCol,
-            [string]$Text,
-            [System.Drawing.Color]$Color
-        )
-        $range = $wsInfo.Cells[$Row,$FromCol,$Row,$ToCol]
-        $range.Value = $Text
-        if ($ToCol -gt $FromCol) { $range.Merge = $true }
-        $range.Style.Font.Bold = $true
-        $range.Style.Fill.PatternType = 'Solid'
-        $range.Style.Fill.BackgroundColor.SetColor($Color)
-    }
-
-    # Helper function: add thin borders around a range.
-    function Add-InfoBorder {
-        param(
-            [int]$FromRow,
-            [int]$FromCol,
-            [int]$ToRow,
-            [int]$ToCol
-        )
-        if ($ToRow -lt $FromRow -or $ToCol -lt $FromCol) { return }
-        $rng = $wsInfo.Cells[$FromRow,$FromCol,$ToRow,$ToCol]
-        $rng.Style.Border.Top.Style    = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
-        $rng.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
-        $rng.Style.Border.Left.Style   = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
-        $rng.Style.Border.Right.Style  = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
-    }
-
-    # Adjust column widths for the new compiling table.
-    $wsInfo.Column(1).Width = 20
-    $wsInfo.Column(2).Width = 28
-    $wsInfo.Column(3).Width = 35
-    $wsInfo.Column(4).Width = 30
-    $wsInfo.Column(5).Width = 45
-
-    # Define header row for the dynamic table.
-    $tableHeaderRow = 15
-    $infoHeaderColor = [System.Drawing.Color]::LightGray
-    $wsInfo.Cells[$tableHeaderRow,1].Value = 'Kategori'
-    $wsInfo.Cells[$tableHeaderRow,2].Value = 'Status'
-    $wsInfo.Cells[$tableHeaderRow,3].Value = 'Förväntat / Design'
-    $wsInfo.Cells[$tableHeaderRow,4].Value = 'Utfall'
-    $wsInfo.Cells[$tableHeaderRow,5].Value = 'Detaljer / exempel'
-    $wsInfo.Cells[$tableHeaderRow,1,$tableHeaderRow,5].Style.Font.Bold = $true
-    $wsInfo.Cells[$tableHeaderRow,1,$tableHeaderRow,5].Style.Fill.PatternType = 'Solid'
-    $wsInfo.Cells[$tableHeaderRow,1,$tableHeaderRow,5].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
-    $wsInfo.Cells[$tableHeaderRow,2,$tableHeaderRow,5].Style.WrapText = $true
-
-    # Build info rows from the compiling summary.
-    $infoRows = New-Object System.Collections.Generic.List[object]
-    
-    # 1. Kontrollmaterial summary
-    $cmCount = $compilingSummary.ControlMaterialCount.Count
-    $cmStatus = if ($cmCount -gt 0) { 'OK' } else { 'Varning' }
-    $cmOutcome = if ($cmCount -gt 0) { "$cmCount olika kontrollmaterial" } else { 'Inga kontrollmaterial hittades' }
-    $cmDetails = if ($cmCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.ControlMaterialCount.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object { "$($_.Value)x $($_.Key)" })
-    } else { '—' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Kontrollmaterial (ControlMaterial)'
-        Status   = $cmStatus
-        Expected = 'N/A'
-        Outcome  = $cmOutcome
-        Details  = $cmDetails
-    })
-
-    # 2. One row per control type definition
-    if ($compilingSummary.ControlTypeStats.Count -gt 0) {
-        foreach ($ct in ($compilingSummary.ControlTypeStats | Sort-Object { [int]($_.ControlType) })) {
-            $catText = "Kontrolltyp _{0}_" -f $ct.ControlType
-            if ($ct.Label) { $catText += " ($($ct.Label))" }
-            $statusCt = if ($ct.Ok -eq $true) { 'OK' } elseif ($ct.Ok -eq $false) { 'Varning' } else { 'Info' }
-            $expCnt = if ($ct.ExpectedCount -ne $null) { $ct.ExpectedCount } elseif ($ct.DesignExpected -ne $null) { $ct.DesignExpected } else { 'N/A' }
-            $bagTxt = if ($ct.BagRangeText) { $ct.BagRangeText } else { 'Bag ej definierad' }
-            $repTxt = if ($ct.ReplicateRangeText) { $ct.ReplicateRangeText } else { 'rep ej definierad' }
-            $expectedText = "$expCnt ($bagTxt, $repTxt)"
-            $outcomeText = "$($ct.ActualCount) hittade"
-            if ($ct.MissingCount -gt 0) { $outcomeText += ", saknar $($ct.MissingCount)" }
-            $ctMissingDetails = 'Inga saknade replikat'
-            if ($ct.MissingReplicates -and $ct.MissingReplicates.Count -gt 0) {
-                $missItems = @($ct.MissingReplicates | Sort-Object Bag, ReplicateNumber | Select-Object -First 5)
-                $missStrings = @()
-                foreach ($m in $missItems) {
-                    $bVal = if ($m.Bag -ne $null) { "{0:00}" -f $m.Bag } else { '?' }
-                    $rVal = if ($m.ReplicateNumber -ne $null) { "{0:00}" -f $m.ReplicateNumber } else { '?' }
-                    $missStrings += "Bag $bVal _${($m.ControlType)}_ rep $rVal"
-                }
-                $extra = $ct.MissingReplicates.Count - $missItems.Count
-                $ctMissingDetails = if ($extra -gt 0) { (Join-LimitedText -Items $missStrings -Max $missStrings.Count) + " (+$extra till)" } else { ($missStrings -join '; ') }
-            }
-            $infoRows.Add([pscustomobject]@{
-                Category = $catText
-                Status   = $statusCt
-                Expected = $expectedText
-                Outcome  = $outcomeText
-                Details  = $ctMissingDetails
-            })
-        }
-    }
-
-    # 3. Overall missing replicates summary
-    $missTotal = $compilingSummary.MissingReplicates.Count
-    $missStatus = if ($missTotal -eq 0) { 'OK' } else { 'Varning' }
-    $missOutcome = if ($missTotal -eq 0) { 'Inga saknade replikat' } else { "$missTotal saknade replikat" }
-    $missDetails = 'Inga saknade replikat'
-    if ($missTotal -gt 0) {
-        $missItems = @($compilingSummary.MissingReplicates | Sort-Object Bag, ControlType, ReplicateNumber | Select-Object -First 8)
-        $missStrings = @()
-        foreach ($m in $missItems) {
-            $missStrings += ("Bag {0:00} _{1}_ rep {2:00}" -f $m.Bag, $m.ControlType, $m.ReplicateNumber)
-        }
-        $extra = $missTotal - $missItems.Count
-        $missDetails = if ($extra -gt 0) { (Join-LimitedText -Items $missStrings -Max $missStrings.Count) + " (+$extra till)" } else { ($missStrings -join '; ') }
-    }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Saknade replikat (Bag/ControlType/Replicate)'
-        Status   = $missStatus
-        Expected = 'Alla definierade replikat ska finnas'
-        Outcome  = $missOutcome
-        Details  = $missDetails
-    })
-
-    # 4. Replacements summary
-    $replCount = $compilingSummary.Replacements.Count
-    $replDetails = if ($replCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.Replacements | ForEach-Object { "$($_.ReplacementType): $($_.SampleId)" })
-    } else { 'Inga ersättningar' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Ersättningar (A/AA/AAA)'
-        Status   = 'Info'
-        Expected = 'Kan förekomma vid behov'
-        Outcome  = "$replCount ersättningar"
-        Details  = $replDetails
-    })
-
-    # 5. Delaminations summary
-    $delamCount = $compilingSummary.Delaminations.Count
-    $delamDetails = if ($delamCount -gt 0) {
-        Join-LimitedText -Items $compilingSummary.Delaminations
-    } else { 'Inga delaminations' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Delaminations (D)'
-        Status   = 'Info'
-        Expected = 'Ej definierat'
-        Outcome  = "$delamCount delaminations"
-        Details  = $delamDetails
-    })
-
-    # 6. Duplicate Sample IDs summary
-    $dupSCount = $compilingSummary.DuplicateSampleIDs.Count
-    $dupSStatus = if ($dupSCount -gt 0) { 'Varning' } else { 'OK' }
-    $dupSOutcome = if ($dupSCount -gt 0) { "Dubbletter för $dupSCount unika Sample ID" } else { 'Inga dubbletter' }
-    $dupSDetails = if ($dupSCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.DuplicateSampleIDs | ForEach-Object { "$($_.SampleId) x$($_.Count)" })
-    } else { '—' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Dublett Sample ID'
-        Status   = $dupSStatus
-        Expected = 'Varje Sample ID ska vara unikt'
-        Outcome  = $dupSOutcome
-        Details  = $dupSDetails
-    })
-
-    # 7. Duplicate Cartridge S/N summary
-    $dupCCount = $compilingSummary.DuplicateCartridgeSN.Count
-    $dupCStatus = if ($dupCCount -gt 0) { 'Varning' } else { 'OK' }
-    $dupCOutcome = if ($dupCCount -gt 0) { "Dubbletter för $dupCCount unika Cartridge S/N" } else { 'Inga dubbletter' }
-    $dupCDetails = if ($dupCCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.DuplicateCartridgeSN | ForEach-Object { "$($_.Cartridge) x$($_.Count)" })
-    } else { '—' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Dublett Cartridge S/N'
-        Status   = $dupCStatus
-        Expected = 'Varje Cartridge S/N ska vara unikt'
-        Outcome  = $dupCOutcome
-        Details  = $dupCDetails
-    })
-
-    # 8. Instrument error codes summary
-    $errCodeCount = $compilingSummary.ErrorCodes.Keys.Count
-    $errStatus = if ($errCodeCount -gt 0) { 'Varning' } else { 'OK' }
-    $errOutcome = if ($errCodeCount -gt 0) { "$errCodeCount olika error-koder" } else { 'Inga instrumentfel' }
-    $errDetails = if ($errCodeCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.ErrorCodes.Keys | Sort-Object | ForEach-Object {
-            $cnt = $compilingSummary.ErrorCodes[$_].Count
-            "$_ x$cnt"
-        })
-    } else { '—' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Instrumentfel (Error XXXX:)'
-        Status   = $errStatus
-        Expected = 'Inga instrumentfel (Error XXXX:)'
-        Outcome  = $errOutcome
-        Details  = $errDetails
-    })
-
-    # 9. Error summary details
-    $errListCount = $compilingSummary.ErrorList.Count
-    $errListDetails = if ($errListCount -gt 0) {
-        Join-LimitedText -Items ($compilingSummary.ErrorList | Select-Object -First 10)
-    } else { '—' }
-    $infoRows.Add([pscustomobject]@{
-        Category = 'Error-sammanfattning'
-        Status   = 'Info'
-        Expected = 'Ej definierat'
-        Outcome  = if ($errListCount -gt 0) { "$errListCount tester med Error XXXX" } else { 'Inga errorrapporterade tester' }
-        Details  = $errListDetails
-    })
-
-    # Write the compiled rows to the worksheet starting below the header row.
-    $dataRow = $tableHeaderRow + 1
-    foreach ($r in $infoRows) {
-        $wsInfo.Cells[$dataRow,1].Value = $r.Category
-        $wsInfo.Cells[$dataRow,2].Value = $r.Status
-        $wsInfo.Cells[$dataRow,3].Value = $r.Expected
-        $wsInfo.Cells[$dataRow,4].Value = $r.Outcome
-        $wsInfo.Cells[$dataRow,5].Value = $r.Details
-        $dataRow++
-    }
-    # Enable text wrapping and top alignment for the data portion of the table.
-    if ($dataRow -gt ($tableHeaderRow + 1)) {
-        try {
-            $wsInfo.Cells[$tableHeaderRow+1,2,$dataRow-1,5].Style.WrapText = $true
-            $wsInfo.Cells[$tableHeaderRow+1,2,$dataRow-1,5].Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
-        } catch {}
-    }
-    # Draw a border around the entire table.
-    Add-InfoBorder -FromRow $tableHeaderRow -FromCol 1 -ToRow ($dataRow-1) -ToCol 5
 
     $selLsp = $null
     try {
@@ -2056,51 +1717,6 @@ try {
         }
     }
 
-    $rowWsFile = 32
-    $rowPart   = $rowWsFile + 1
-    $rowBatch  = $rowWsFile + 2
-    $rowCart   = $rowWsFile + 3
-    $rowDoc    = $rowWsFile + 4
-    $rowRev    = $rowWsFile + 5
-    $rowEff    = $rowWsFile + 6
-    $rowPosFile= $rowWsFile + 8
-    $rowPosDoc = $rowPosFile + 1
-    $rowPosRev = $rowPosFile + 2
-    $rowPosEff = $rowPosFile + 3
-    $rowNegFile= $rowPosFile + 4
-    $rowNegDoc = $rowNegFile + 1
-    $rowNegRev = $rowNegFile + 2
-    $rowNegEff = $rowNegFile + 3
-
-    $headerLabels = @{
-        $rowWsFile = 'Worksheet'
-        $rowPart   = 'Part No.'
-        $rowBatch  = 'Batch No(s)'
-        $rowCart   = 'Cartridge No. (LSP)'
-        $rowDoc    = 'Document Number'
-        $rowRev    = 'Rev'
-        $rowEff    = 'Effective'
-        $rowPosFile= 'Seal Test POS'
-        $rowPosDoc = 'Document Number'
-        $rowPosRev = 'Rev'
-        $rowPosEff = 'Effective'
-        $rowNegFile= 'Seal Test NEG'
-        $rowNegDoc = 'Document Number'
-        $rowNegRev = 'Rev'
-        $rowNegEff = 'Effective'
-    }
-    foreach ($kvp in $headerLabels.GetEnumerator()) {
-        $wsInfo.Cells["A$($kvp.Key)"].Value = $kvp.Value
-        $wsInfo.Cells["A$($kvp.Key)"].Style.Font.Bold = $true
-    }
-
-    if ($selLsp) {
-        $wsInfo.Cells["B$rowWsFile"].Style.Numberformat.Format = '@'
-        $wsInfo.Cells["B$rowWsFile"].Value = (Split-Path $selLsp -Leaf)
-    } else {
-        $wsInfo.Cells["B$rowWsFile"].Value = ''
-    }
-
     $consPart  = Get-ConsensusValue -Type 'Part'      -Ws $headerWs.PartNo      -Pos $headerPos.PartNumber   -Neg $headerNeg.PartNumber
     $consBatch = Get-ConsensusValue -Type 'Batch'     -Ws $headerWs.BatchNo     -Pos $headerPos.BatchNumber  -Neg $headerNeg.BatchNumber
     $consCart  = Get-ConsensusValue -Type 'Cartridge' -Ws $headerWs.CartridgeNo -Pos $headerPos.CartridgeNo  -Neg $headerNeg.CartridgeNo
@@ -2117,58 +1733,524 @@ try {
         }
     }
 
-    if ($consPart.Value)  { $wsInfo.Cells["B$rowPart"].Value  = $consPart.Value }  else { $wsInfo.Cells["B$rowPart"].Value  = '' }
-    if ($consBatch.Value) { $wsInfo.Cells["B$rowBatch"].Value = $consBatch.Value } else { $wsInfo.Cells["B$rowBatch"].Value = '' }
-    if ($consCart.Value)  { $wsInfo.Cells["B$rowCart"].Value  = $consCart.Value }  else { $wsInfo.Cells["B$rowCart"].Value  = '' }
+    if (-not $consPart)  { $consPart  = @{ Value = $null; Source = $null; Note = $null } }
+    if (-not $consBatch) { $consBatch = @{ Value = $null; Source = $null; Note = $null } }
+    if (-not $consCart)  { $consCart  = @{ Value = $null; Source = $null; Note = $null } }
 
+    $wsDeviationNotes = @{}
     if ($wsHeaderCheck -and $wsHeaderCheck.Details) {
         try {
             $linesDev = ($wsHeaderCheck.Details -split "`r?`n")
             foreach ($ln in $linesDev) {
-                if ($ln -match '^-\s*PartNo[^:]*:\s*(.+)$') { $wsInfo.Cells["C$rowPart"].Value  = 'Avvikande flik: ' + $matches[1].Trim() }
-                elseif ($ln -match '^-\s*BatchNo[^:]*:\s*(.+)$') { $wsInfo.Cells["C$rowBatch"].Value = 'Avvikande flik: ' + $matches[1].Trim() }
-                elseif ($ln -match '^-\s*CartridgeNo[^:]*:\s*(.+)$') { $wsInfo.Cells["C$rowCart"].Value  = 'Avvikande flik: ' + $matches[1].Trim() }
+                if ($ln -match '^-\s*PartNo[^:]*:\s*(.+)$') { $wsDeviationNotes['Part']      = 'Avvikande flik: ' + $matches[1].Trim() }
+                elseif ($ln -match '^-\s*BatchNo[^:]*:\s*(.+)$') { $wsDeviationNotes['Batch']     = 'Avvikande flik: ' + $matches[1].Trim() }
+                elseif ($ln -match '^-\s*CartridgeNo[^:]*:\s*(.+)$') { $wsDeviationNotes['Cartridge'] = 'Avvikande flik: ' + $matches[1].Trim() }
             }
         } catch {}
     }
 
+    $wsDocClean = $null
     if ($headerWs) {
-        $doc = $headerWs.DocumentNumber
-        if ($doc) { $doc = ($doc -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim() }
-        if ($headerWs.Attachment -and ($doc -notmatch '(?i)\bAttachment\s+\w+\b')) { $doc = "$doc Attachment $($headerWs.Attachment)" }
-        $wsInfo.Cells["B$rowDoc"].Value = $doc
-        $wsInfo.Cells["B$rowRev"].Value = $headerWs.Rev
-        $wsInfo.Cells["B$rowEff"].Value = $headerWs.Effective
+        $wsDocClean = $headerWs.DocumentNumber
+        if ($wsDocClean) { $wsDocClean = ($wsDocClean -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$', '').Trim() }
+        if ($headerWs.Attachment -and ($wsDocClean -notmatch '(?i)\bAttachment\s+\w+\b')) { $wsDocClean = "$wsDocClean Attachment $($headerWs.Attachment)" }
     }
-
-    if ($selPos) {
-        $wsInfo.Cells["B$rowPosFile"].Style.Numberformat.Format = '@'
-        $wsInfo.Cells["B$rowPosFile"].Value = (Split-Path $selPos -Leaf)
-    }
+    $docPosClean = $null
     if ($headerPos) {
-        $docPos = $headerPos.DocumentNumber
-        if ($docPos) { $docPos = ($docPos -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
-        $wsInfo.Cells["B$rowPosDoc"].Value = $docPos
-        $wsInfo.Cells["B$rowPosRev"].Value = $headerPos.Rev
-        $wsInfo.Cells["B$rowPosEff"].Value = $headerPos.Effective
+        $docPosClean = $headerPos.DocumentNumber
+        if ($docPosClean) { $docPosClean = ($docPosClean -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
     }
-
-    if ($selNeg) {
-        $wsInfo.Cells["B$rowNegFile"].Style.Numberformat.Format = '@'
-        $wsInfo.Cells["B$rowNegFile"].Value = (Split-Path $selNeg -Leaf)
-    }
+    $docNegClean = $null
     if ($headerNeg) {
-        $docNeg = $headerNeg.DocumentNumber
-        if ($docNeg) { $docNeg = ($docNeg -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
-        $wsInfo.Cells["B$rowNegDoc"].Value = $docNeg
-        $wsInfo.Cells["B$rowNegRev"].Value = $headerNeg.Rev
-        $wsInfo.Cells["B$rowNegEff"].Value = $headerNeg.Effective
+        $docNegClean = $headerNeg.DocumentNumber
+        if ($docNegClean) { $docNegClean = ($docNegClean -replace '(?i)\s+(?:Rev(?:ision)?|Effective|p\.)\b.*$','').Trim() }
     }
 
-    $rowLinkStart = $rowNegEff + 2
-    $wsInfo.Cells["A$rowLinkStart"].Value = 'SharePoint Batch Link'
-    $wsInfo.Cells["A$rowLinkStart"].Style.Font.Bold = $true
-    Add-Hyperlink -Cell $wsInfo.Cells["B$rowLinkStart"] -Text $batchInfo.LinkText -Url $batchInfo.Url
+    $wsFileName  = if ($selLsp) { Split-Path $selLsp -Leaf } else { '' }
+    $posFileName = if ($selPos) { Split-Path $selPos -Leaf } else { '' }
+    $negFileName = if ($selNeg) { Split-Path $selNeg -Leaf } else { '' }
+
+    $wsInfo.Cells['A1'].Value = 'Information'
+    $wsInfo.Cells['A1'].Style.Font.Bold = $true
+    $wsInfo.Cells['A1'].Style.Font.Size = 14
+
+    $infoHeaderColor = [System.Drawing.Color]::LightGray
+
+    function Join-LimitedText {
+        param(
+            [object[]]$Items,
+            [int]$Max = 6
+        )
+        if (-not $Items -or $Items.Count -eq 0) { return '' }
+        $arr = @($Items)
+        if ($arr.Count -gt $Max) {
+            $shown = $arr[0..($Max-1)]
+            $rest  = $arr.Count - $shown.Count
+            return (($shown -join '; ') + " (+$rest till)")
+        }
+        return ($arr -join '; ')
+    }
+
+    function Set-InfoHeaderRow {
+        param(
+            [int]$Row,
+            [int]$FromCol,
+            [int]$ToCol,
+            [string]$Text,
+            [System.Drawing.Color]$Color
+        )
+        $range = $wsInfo.Cells[$Row,$FromCol,$Row,$ToCol]
+        $range.Value = $Text
+        if ($ToCol -gt $FromCol) { $range.Merge = $true }
+        $range.Style.Font.Bold = $true
+        $range.Style.Fill.PatternType = 'Solid'
+        $range.Style.Fill.BackgroundColor.SetColor($Color)
+    }
+
+    function Add-InfoBorder {
+        param(
+            [int]$FromRow,
+            [int]$FromCol,
+            [int]$ToRow,
+            [int]$ToCol
+        )
+        if ($ToRow -lt $FromRow -or $ToCol -lt $FromCol) { return }
+        $rng = $wsInfo.Cells[$FromRow,$FromCol,$ToRow,$ToCol]
+        $rng.Style.Border.Top.Style    = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+        $rng.Style.Border.Bottom.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+        $rng.Style.Border.Left.Style   = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+        $rng.Style.Border.Right.Style  = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+    }
+
+    function Get-ControlMaterialNameMap {
+        param([string]$Path)
+        $map = @{}
+        if (-not (Test-Path -LiteralPath $Path)) { return $map }
+        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
+        try {
+            $ws = $pkg.Workbook.Worksheets[1]
+            if (-not $ws -or -not $ws.Dimension) { return $map }
+            $codeCol = $null; $nameCol = $null
+            $maxC = $ws.Dimension.End.Column
+            for ($c=1; $c -le $maxC; $c++) {
+                $hdr = Normalize-HeaderText ($ws.Cells[1,$c].Text + '')
+                if ($hdr -match '^(?i)code$') { $codeCol = $c }
+                if ($hdr -match '^(?i)(name|namn)$') { $nameCol = $c }
+            }
+            if (-not $codeCol -or -not $nameCol) { return $map }
+            $maxR = $ws.Dimension.End.Row
+            for ($r=2; $r -le $maxR; $r++) {
+                $code = ($ws.Cells[$r,$codeCol].Text + '').Trim()
+                if (-not $code) { continue }
+                $name = ($ws.Cells[$r,$nameCol].Text + '').Trim()
+                $map[$code.ToUpper()] = $name
+            }
+        } finally { $pkg.Dispose() }
+        return $map
+    }
+
+    function Get-WorksheetControlMaterials {
+        param([string]$Path)
+        if (-not (Test-Path -LiteralPath $Path)) { return @() }
+        $out = New-Object System.Collections.Generic.List[string]
+        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
+        try {
+            $ws = $pkg.Workbook.Worksheets | Where-Object { $_.Name -match '(?i)test\s*summary' -and $_.Dimension } | Select-Object -First 1
+            if (-not $ws) {
+                $ws = $pkg.Workbook.Worksheets | Where-Object { $_.Name -notmatch '(?i)worksheet\s*instructions' -and $_.Dimension } | Select-Object -First 1
+            }
+            if (-not $ws -or -not $ws.Dimension) { return @() }
+
+            $rx = [regex]'(?i)control\s*material'
+            $hit = Find-RegexCell -Ws $ws -Rx $rx -MaxRows ([Math]::Min(120,$ws.Dimension.End.Row)) -MaxCols ([Math]::Min(80,$ws.Dimension.End.Column))
+            $textCandidates = New-Object System.Collections.Generic.List[string]
+            if ($hit) {
+                for ($c = $hit.Col + 1; $c -le [Math]::Min($ws.Dimension.End.Column, $hit.Col + 5); $c++) {
+                    $val = ($ws.Cells[$hit.Row,$c].Text + '').Trim()
+                    if ($val) { $textCandidates.Add($val); break }
+                }
+                if ($textCandidates.Count -eq 0) {
+                    $val = ($ws.Cells[$hit.Row + 1, $hit.Col].Text + '').Trim()
+                    if ($val) { $textCandidates.Add($val) }
+                }
+            }
+
+            if ($textCandidates.Count -eq 0) {
+                for ($r=1; $r -le [Math]::Min($ws.Dimension.End.Row, 80); $r++) {
+                    $rowTxt = ($ws.Cells[$r,1].Text + '').Trim()
+                    if ($rowTxt -match '(?i)control\s*material') {
+                        $textCandidates.Add(($ws.Cells[$r,1,$r,$ws.Dimension.End.Column].Text + '').Trim())
+                    }
+                }
+            }
+
+            foreach ($t in $textCandidates) {
+                if (-not $t) { continue }
+                $codes = [regex]::Matches($t,'[A-Za-z0-9]+') | ForEach-Object { $_.Value.ToUpper() } | Where-Object { $_ }
+                foreach ($c in $codes) { $out.Add($c) }
+            }
+        } finally { $pkg.Dispose() }
+        return @($out.ToArray() | Select-Object -Unique)
+    }
+
+    $cmMapPath = Join-Path $ScriptRootPath 'ControlMaterialMap_SE.xlsx'
+    $controlMaterialNameMap = Get-ControlMaterialNameMap -Path $cmMapPath
+    $worksheetControlMaterials = Get-WorksheetControlMaterials -Path $selLsp
+
+    $wsInfo.Column(1).Width = 18
+    $wsInfo.Column(2).Width = 28
+    $wsInfo.Column(3).Width = 32
+    $wsInfo.Column(4).Width = 28
+    $wsInfo.Column(5).Width = 45
+
+    $row = 3
+
+    # A. Körningsöversikt
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Körningsöversikt' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Fält'
+    $wsInfo.Cells[$row,2].Value = 'Värde'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $overviewRows = @(
+        @{K='Skriptversion'; V=$ScriptVersion},
+        @{K='Användare';     V=[Environment]::UserName},
+        @{K='Datum Tid';     V=(Get-Date).ToString('yyyy-MM-dd HH:mm')},
+        @{K='Minitab Macro'; V=$miniVal},
+        @{K='CSV';           V=if ($selCsv) { Split-Path $selCsv -Leaf } else { 'N/A' }},
+        @{K='Assay';         V=$assayName},
+        @{K='Assay Version'; V=$assayVersion},
+        @{K='Reagent Lot (LSP)'; V=if ($lspSummary) { $lspSummary } else { $lsp }},
+        @{K='Antal tester';  V=$testCount}
+    )
+    foreach ($ov in $overviewRows) {
+        $wsInfo.Cells[$row,1].Value = $ov.K
+        $wsInfo.Cells[$row,1].Style.Font.Bold = $true
+        $wsInfo.Cells[$row,2].Value = if ($ov.V) { $ov.V } else { 'N/A' }
+        $row++
+    }
+    $ovStart = $row - $overviewRows.Count - 1
+    Add-InfoBorder -FromRow $ovStart -FromCol 1 -ToRow ($row-1) -ToCol 2
+    $row += 1
+
+    # B. Kontrollmaterial
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Kontrollmaterial' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Kod'
+    $wsInfo.Cells[$row,2].Value = 'Namn'
+    $wsInfo.Cells[$row,3].Value = 'Antal'
+    $wsInfo.Cells[$row,1,$row,3].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,3].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,3].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $cmCodes = New-Object System.Collections.Generic.List[string]
+    foreach ($code in $compilingSummary.ControlMaterialCount.Keys) { $cmCodes.Add($code) }
+    foreach ($code in $worksheetControlMaterials) { $cmCodes.Add($code) }
+    $cmKeys = @(
+        $cmCodes.ToArray() |
+            Where-Object { $_ } |
+            Select-Object -Unique |
+            Sort-Object @{ Expression = {
+                if ($compilingSummary.ControlMaterialCount.ContainsKey($_)) { -$compilingSummary.ControlMaterialCount[$_] } else { 0 }
+            } }, @{ Expression = { $_ } }
+    )
+    $cmStart = $row - 1
+    if ($cmKeys.Count -gt 0) {
+        foreach ($code in $cmKeys) {
+            $name = ''
+            $cUpper = ($code + '').ToUpper()
+            if ($controlMaterialNameMap.ContainsKey($cUpper)) { $name = $controlMaterialNameMap[$cUpper] }
+            elseif ($worksheetControlMaterials -and ($worksheetControlMaterials -contains $cUpper)) { $name = '' }
+            $countVal = if ($compilingSummary.ControlMaterialCount.ContainsKey($code)) { $compilingSummary.ControlMaterialCount[$code] } else { 0 }
+            $wsInfo.Cells[$row,1].Value = $code
+            $wsInfo.Cells[$row,2].Value = if ($name) { $name } else { 'Okänd' }
+            $wsInfo.Cells[$row,3].Value = $countVal
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga kontrollmaterial hittades'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow ($cmStart) -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row += 1
+
+    # C. Kontrolltyp-design
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Kontrolltyp-design' -Color $infoHeaderColor
+    $row++
+    $ctHeader = @('ControlType','Label','Förväntat','Bag-intervall','Replikat-intervall','Faktiskt','Saknas','Status')
+    for ($i=0; $i -lt $ctHeader.Count; $i++) { $wsInfo.Cells[$row,$i+1].Value = $ctHeader[$i] }
+    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $ctStart = $row - 1
+    if ($compilingSummary.ControlTypeStats.Count -gt 0) {
+        foreach ($ct in ($compilingSummary.ControlTypeStats | Sort-Object { [int]($_.ControlType) })) {
+            $wsInfo.Cells[$row,1].Value = $ct.ControlType
+            $wsInfo.Cells[$row,2].Value = $ct.Label
+            $wsInfo.Cells[$row,3].Value = $ct.ExpectedCount
+            $wsInfo.Cells[$row,4].Value = $ct.BagRangeText
+            $wsInfo.Cells[$row,5].Value = $ct.ReplicateRangeText
+            $wsInfo.Cells[$row,6].Value = $ct.ActualCount
+            $wsInfo.Cells[$row,7].Value = $ct.MissingCount
+            $wsInfo.Cells[$row,8].Value = if ($ct.Ok -eq $true) { '✔' } else { '⚠' }
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Ingen Compiling-analys tillgänglig'
+        $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $ctStart -FromCol 1 -ToRow ($row-1) -ToCol $ctHeader.Count
+    $row += 1
+
+    # D. Saknade replikat
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Saknade replikat' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Bag'
+    $wsInfo.Cells[$row,2].Value = 'ControlType'
+    $wsInfo.Cells[$row,3].Value = 'Replikat'
+    $wsInfo.Cells[$row,1,$row,3].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,3].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,3].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $missStart = $row - 1
+    $maxMissingToShow = 10
+    if ($compilingSummary.MissingReplicates.Count -gt 0) {
+        $missItems = @($compilingSummary.MissingReplicates | Sort-Object Bag, ControlType, ReplicateNumber)
+        $shown = $missItems | Select-Object -First $maxMissingToShow
+        foreach ($m in $shown) {
+            $wsInfo.Cells[$row,1].Value = $m.Bag
+            $wsInfo.Cells[$row,2].Value = $m.ControlType
+            $wsInfo.Cells[$row,3].Value = $m.ReplicateNumber
+            $row++
+        }
+        $extra = $missItems.Count - $shown.Count
+        if ($extra -gt 0) {
+            $wsInfo.Cells[$row,1].Value = "(+$extra till)"
+            $wsInfo.Cells[$row,1,$row,3].Merge = $true
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga saknade replikat'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $missStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row += 1
+
+    # E. Ersättningar & Delaminations
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Ersättningar (A/AA/AAA)' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Sample ID'
+    $wsInfo.Cells[$row,2].Value = 'Typ'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $repStart = $row - 1
+    if ($compilingSummary.Replacements.Count -gt 0) {
+        foreach ($rpl in $compilingSummary.Replacements) {
+            $wsInfo.Cells[$row,1].Value = $rpl.SampleId
+            $wsInfo.Cells[$row,2].Value = $rpl.ReplacementType
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga ersättningar'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $repStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row++
+
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Delaminations (D)' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Sample ID'
+    $wsInfo.Cells[$row,1].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $delamStart = $row - 1
+    if ($compilingSummary.Delaminations.Count -gt 0) {
+        foreach ($d in $compilingSummary.Delaminations) {
+            $wsInfo.Cells[$row,1].Value = $d
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga delaminations'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $delamStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row += 1
+
+    # F. Dubbletter
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Dublett Sample ID' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Sample ID'
+    $wsInfo.Cells[$row,2].Value = 'Antal'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $dupSStart = $row - 1
+    if ($compilingSummary.DuplicateSampleIDs.Count -gt 0) {
+        foreach ($ds in $compilingSummary.DuplicateSampleIDs) {
+            $wsInfo.Cells[$row,1].Value = $ds.SampleId
+            $wsInfo.Cells[$row,2].Value = $ds.Count
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga dubbletter'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $dupSStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row++
+
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Dublett Cartridge S/N' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Cartridge S/N'
+    $wsInfo.Cells[$row,2].Value = 'Antal'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $dupCStart = $row - 1
+    if ($compilingSummary.DuplicateCartridgeSN.Count -gt 0) {
+        foreach ($dc in $compilingSummary.DuplicateCartridgeSN) {
+            $wsInfo.Cells[$row,1].Value = $dc.Cartridge
+            $wsInfo.Cells[$row,2].Value = $dc.Count
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga dubbletter'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $dupCStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row += 1
+
+    # G. Instrumentfel
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel (sammanfattning)' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Errorkod'
+    $wsInfo.Cells[$row,2].Value = 'Antal'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $errSumStart = $row - 1
+    if ($compilingSummary.ErrorCodes.Keys.Count -gt 0) {
+        foreach ($code in ($compilingSummary.ErrorCodes.Keys | Sort-Object)) {
+            $vals = $compilingSummary.ErrorCodes[$code]
+            $wsInfo.Cells[$row,1].Value = $code
+            $wsInfo.Cells[$row,2].Value = if ($vals) { $vals.Count } else { 0 }
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga instrumentfel'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $errSumStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    $row++
+
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel (detaljer)' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'Errorkod'
+    $wsInfo.Cells[$row,2].Value = 'Sample ID'
+    $wsInfo.Cells[$row,1,$row,2].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,2].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+    $errDetStart = $row - 1
+    if ($compilingSummary.ErrorList.Count -gt 0) {
+        $detailMax = 10
+        $shownErr = $compilingSummary.ErrorList | Select-Object -First $detailMax
+        foreach ($e in $shownErr) {
+            $parts = $e -split ':',2
+            $wsInfo.Cells[$row,1].Value = ($parts[0] + '').Trim()
+            if ($parts.Count -gt 1) { $wsInfo.Cells[$row,2].Value = ($parts[1] + '').Trim() }
+            $row++
+        }
+        $extra = $compilingSummary.ErrorList.Count - $shownErr.Count
+        if ($extra -gt 0) {
+            $wsInfo.Cells[$row,1].Value = "(+$extra till)"
+            $wsInfo.Cells[$row,1,$row,3].Merge = $true
+            $row++
+        }
+    } else {
+        $wsInfo.Cells[$row,1].Value = 'Inga detaljer'
+        $wsInfo.Cells[$row,1,$row,3].Merge = $true
+        $row++
+    }
+    Add-InfoBorder -FromRow $errDetStart -FromCol 1 -ToRow ($row-1) -ToCol 3
+    try { $wsInfo.Cells[$errDetStart,2,($row-1),2].Style.WrapText = $true } catch {}
+    $row += 1
+
+    # H. Dokumentinformation (Worksheet / Seal Test)
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Dokumentinformation (Worksheet / Seal Test)' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = ''
+    $wsInfo.Cells[$row,2].Value = 'Worksheet'
+    $wsInfo.Cells[$row,3].Value = 'Seal Test POS'
+    $wsInfo.Cells[$row,4].Value = 'Seal Test NEG'
+    $wsInfo.Cells[$row,1,$row,4].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,4].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,4].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+
+    function Set-DocRow {
+        param(
+            [int]$RowIndex,
+            [string]$Label,
+            [string]$WsVal,
+            [string]$PosVal,
+            [string]$NegVal
+        )
+        $wsInfo.Cells[$RowIndex,1].Value = $Label
+        $wsInfo.Cells[$RowIndex,2].Value = if ($WsVal) { $WsVal } else { 'N/A' }
+        $wsInfo.Cells[$RowIndex,3].Value = if ($PosVal) { $PosVal } else { 'N/A' }
+        $wsInfo.Cells[$RowIndex,4].Value = if ($NegVal) { $NegVal } else { 'N/A' }
+
+        $mismatch = ($PosVal -and $NegVal -and ($PosVal -ne $NegVal))
+        if ($mismatch) {
+            $cells = $wsInfo.Cells[$RowIndex,3,$RowIndex,4]
+            $cells.Style.Fill.PatternType = 'Solid'
+            $cells.Style.Fill.BackgroundColor.SetColor([System.Drawing.Color]::LightCoral)
+        }
+        $wsInfo.Cells[$RowIndex,1].Style.Font.Bold = $true
+    }
+
+    $docRows = @(
+        @{Label='Filnamn';        Ws=$wsFileName;  Pos=$posFileName; Neg=$negFileName},
+        @{Label='Dokumentnummer'; Ws=$wsDocClean;  Pos=$docPosClean; Neg=$docNegClean},
+        @{Label='Revision';       Ws=if ($headerWs) { $headerWs.Rev } else { $null }; Pos=if ($headerPos) { $headerPos.Rev } else { $null }; Neg=if ($headerNeg) { $headerNeg.Rev } else { $null }},
+        @{Label='Giltig fr.o.m.'; Ws=if ($headerWs) { $headerWs.Effective } else { $null }; Pos=if ($headerPos) { $headerPos.Effective } else { $null }; Neg=if ($headerNeg) { $headerNeg.Effective } else { $null }}
+    )
+    foreach ($dr in $docRows) {
+        Set-DocRow -RowIndex $row -Label $dr.Label -WsVal $dr.Ws -PosVal $dr.Pos -NegVal $dr.Neg
+        $row++
+    }
+    Add-InfoBorder -FromRow ($row - $docRows.Count - 1) -FromCol 1 -ToRow ($row-1) -ToCol 4
+    $row += 1
+
+    # I. Länkar
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Länkar' -Color $infoHeaderColor
+    $row++
+    $wsInfo.Cells[$row,1].Value = 'SharePoint Batch-länk'
+    $wsInfo.Cells[$row,1].Style.Font.Bold = $true
+    if ($batchInfo -and $batchInfo.Url) {
+        $linkText = if ($batchInfo.LinkText) { $batchInfo.LinkText } else { 'LÄNK' }
+        Add-Hyperlink -Cell $wsInfo.Cells[$row,2] -Text $linkText -Url $batchInfo.Url
+    } else {
+        $wsInfo.Cells[$row,2].Value = 'Ingen batchlänk tillgänglig'
+    }
+    $row++
 
     $linkMap = [ordered]@{
         'IPT App'      = 'https://apps.powerapps.com/play/e/default-771c9c47-7f24-44dc-958e-34f8713a8394/a/fd340dbd-bbbf-470b-b043-d2af4cb62c83'
@@ -2177,12 +2259,17 @@ try {
         'BMRAM'        = 'https://cepheid62468.coolbluecloud.com/'
         'Agile'        = 'https://agileprod.cepheid.com/Agile/default/login-cms.jsp'
     }
-    $rowLink = $rowLinkStart + 1
     foreach ($key in $linkMap.Keys) {
-        $wsInfo.Cells["A$rowLink"].Value = $key
-        Add-Hyperlink -Cell $wsInfo.Cells["B$rowLink"] -Text 'LÄNK' -Url $linkMap[$key]
-        $rowLink++
+        $wsInfo.Cells[$row,1].Value = $key
+        Add-Hyperlink -Cell $wsInfo.Cells[$row,2] -Text 'LÄNK' -Url $linkMap[$key]
+        $row++
     }
+
+    try {
+        $wsInfo.Cells[1,2,($row-1),5].Style.WrapText = $true
+        $wsInfo.Cells[1,1,($row-1),5].Style.VerticalAlignment = [OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
+    } catch {}
+
 } catch {
     Gui-Log "⚠️ Information-blad fel: $($_.Exception.Message)" 'Warn'
 }
