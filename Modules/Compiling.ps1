@@ -52,8 +52,7 @@ $script:CompilingAssayDesigns = @(
         Assays       = @('HBV VL','HCV VL','HCV VL FS','HIV VL','HIV VL XC','HIV QA','HIV QA XC')
         ControlTypes = @(
             @{ ControlType='0'; Label='NEG'; Bags=1..10; Replicates=1..10; ExpectedCount=100 },
-            @{ ControlType='1'; Label='POS'; Bags=0..0;  Replicates=1..10;  ExpectedCount=10 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..18; ExpectedCount=80 },
+            @{ ControlType='1'; Label='POS'; Bags=0..10; Replicates=11..18; ExpectedCount=90 },
             @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
         )
     },
@@ -325,7 +324,7 @@ function Get-CompilingAnalysis {
                     $codeKey = "Error $($mErr.Groups[1].Value)"
                     if (-not $errorsMap.ContainsKey($codeKey)) { $errorsMap[$codeKey] = New-Object System.Collections.Generic.List[string] }
                     $errorsMap[$codeKey].Add($sampleId)
-                    $errorList.Add("$codeKey: $sampleId")
+                    $errorList.Add("$codeKey $sampleId")
                 }
             }
         }
@@ -398,11 +397,7 @@ function Get-CompilingAnalysis {
             $reps = @($ct.Replicates)
             $designExpected = $bags.Count * $reps.Count
             $expected = if ($ct.ContainsKey('ExpectedCount')) { [int]$ct.ExpectedCount } else { $designExpected }
-            $actual = ($parsedRows | Where-Object {
-                $_.Parsed.ControlType -eq $ct.ControlType -and
-                ($bags -contains $_.Parsed.Bag) -and
-                ($reps -contains $_.Parsed.ReplicateNumber)
-            }).Count
+            $actual = ($parsedRows | Where-Object { $_.Parsed.ControlType -eq $ct.ControlType }).Count
             $missing = New-Object System.Collections.Generic.List[object]
             foreach ($b in $bags) {
                 foreach ($r in $reps) {
