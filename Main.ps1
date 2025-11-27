@@ -1914,51 +1914,42 @@ try {
 
     function Get-WorksheetControlMaterials {
         param([string]$Path)
+
         if (-not (Test-Path -LiteralPath $Path)) { return @() }
-        $out = New-Object System.Collections.Generic.List[string]
-        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
+
+        $pkg = $null
         try {
-            $ws = $pkg.Workbook.Worksheets | Where-Object { $_.Name -match '(?i)test\s*summary' -and $_.Dimension } | Select-Object -First 1
-            if (-not $ws) {
-                $ws = $pkg.Workbook.Worksheets | Where-Object { $_.Name -notmatch '(?i)worksheet\s*instructions' -and $_.Dimension } | Select-Object -First 1
+            $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
+            $cmResult = $null
+            try {
+                $cmResult = Get-TestSummaryControls -Pkg $pkg
             }
-            if (-not $ws -or -not $ws.Dimension) { return @() }
-
-            $rx = [regex]'(?i)control\s*material'
-            $hit = Find-RegexCell -Ws $ws -Rx $rx -MaxRows ([Math]::Min(120,$ws.Dimension.End.Row)) -MaxCols ([Math]::Min(80,$ws.Dimension.End.Column))
-            $textCandidates = New-Object System.Collections.Generic.List[string]
-            if ($hit) {
-                for ($c = $hit.Col + 1; $c -le [Math]::Min($ws.Dimension.End.Column, $hit.Col + 5); $c++) {
-                    $val = (($ws.Cells[$hit.Row,$c].Text) -join '').Trim()
-                    if ($val) { $textCandidates.Add($val); break }
-                }
-                if ($textCandidates.Count -eq 0) {
-                    $val = (($ws.Cells[$hit.Row + 1, $hit.Col].Text) -join '').Trim()
-                    if ($val) { $textCandidates.Add($val) }
-                }
+            catch {
+                Gui-Log ("⚠️ Kunde inte extrahera kontrollmaterial från Test Summary: " + $_.Exception.Message) 'Warn'
+                $cmResult = $null
             }
 
-            if ($textCandidates.Count -eq 0) {
-                for ($r=1; $r -le [Math]::Min($ws.Dimension.End.Row, 80); $r++) {
-                    $rowTxt = (($ws.Cells[$r,1].Text) -join '').Trim()
-                    if ($rowTxt -match '(?i)control\s*material') {
-                        $textCandidates.Add((($ws.Cells[$r,1,$r,$ws.Dimension.End.Column].Text) -join '').Trim())
-                    }
-                }
+            if ($cmResult -and $cmResult.Controls) {
+                return @($cmResult.Controls)
             }
-
-            foreach ($t in $textCandidates) {
-                if (-not $t) { continue }
-                $codes = [regex]::Matches($t,'[A-Za-z0-9]+') | ForEach-Object { $_.Value.ToUpper() } | Where-Object { $_ }
-                foreach ($c in $codes) { $out.Add($c) }
+            else {
+                return @()
             }
-        } finally { $pkg.Dispose() }
-        return @($out.ToArray() | Select-Object -Unique)
+        }
+        finally {
+            if ($pkg) { $pkg.Dispose() }
+        }
     }
 
     $cmMapPath = Join-Path $ScriptRootPath 'ControlMaterialMap_SE.xlsx'
     $controlMaterialNameMap = Get-ControlMaterialNameMap -Path $cmMapPath
     $worksheetControlMaterials = Get-WorksheetControlMaterials -Path $selLsp
+    $tsControlObjects = @()
+    if ($tsControls -and $tsControls.Controls) {
+        $tsControlObjects = @($tsControls.Controls)
+    } elseif ($worksheetControlMaterials) {
+        $tsControlObjects = @($worksheetControlMaterials)
+    }
 
     $wsInfo.Column(1).Width = 18
     $wsInfo.Column(2).Width = 28
@@ -2032,8 +2023,8 @@ try {
     }
 
     $tsCounts = @{}
-    if ($tsControls -and $tsControls.Controls) {
-        foreach ($ctrl in $tsControls.Controls) {
+    if ($tsControlObjects -and $tsControlObjects.Count -gt 0) {
+        foreach ($ctrl in $tsControlObjects) {
             if (-not $ctrl.PartNos) { continue }
             foreach ($pn in $ctrl.PartNos) {
                 $key = ($pn + '').ToUpper()
