@@ -74,6 +74,24 @@ try {
     }
 } catch { Gui-Log "⚠️ EPPlus-laddning misslyckades: $($_.Exception.Message)" 'Warn' }
 
+# Bekräfta att kritiska moduler är tillgängliga i bakgrundslogg
+try {
+    foreach ($modName in @('PnP.PowerShell')) {
+        $isLoaded = Get-Module -Name $modName -ListAvailable -ErrorAction SilentlyContinue
+        $msg = if ($isLoaded) { "Modul laddad eller tillgänglig: $modName" } else { "Modul saknas: $modName" }
+        $severity = if ($isLoaded) { 'Info' } else { 'Warn' }
+        Write-BackendLog -Message $msg -Severity $severity
+    }
+    $epplusLoaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'EPPlus' }
+    if ($epplusLoaded) {
+        Write-BackendLog -Message 'EPPlus assembly laddad i AppDomain.' -Severity 'Info'
+    } else {
+        Write-BackendLog -Message 'EPPlus assembly kunde inte verifieras som laddad.' -Severity 'Warn'
+    }
+} catch {
+    Write-BackendError -Context 'Modulkontroll' -ErrorRecord $_
+}
+
 # Efter att EPPlus laddats, läs in kontrollmaterial-kartan en gång
 try {
     # Kontrollmaterial-kartan kräver att stigen är definierad i Config.ps1 som $Global:ControlMaterialMapPath
@@ -1814,6 +1832,13 @@ try {
 
     $infoHeaderColor = [System.Drawing.Color]::LightGray
 
+    function Convert-ToInfoValue {
+        param([object]$Value)
+        if ($null -eq $Value) { return '' }
+        if ($Value -is [System.Array]) { return ($Value -join '; ') }
+        return $Value
+    }
+
     function Join-LimitedText {
         param(
             [object[]]$Items,
@@ -1964,9 +1989,9 @@ try {
         @{K='Antal tester';  V=$testCount}
     )
     foreach ($ov in $overviewRows) {
-        $wsInfo.Cells[$row,1].Value = $ov.K
+        $wsInfo.Cells[$row,1].Value = Convert-ToInfoValue $ov.K
         $wsInfo.Cells[$row,1].Style.Font.Bold = $true
-        $wsInfo.Cells[$row,2].Value = if ($ov.V) { $ov.V } else { 'N/A' }
+        $wsInfo.Cells[$row,2].Value = if ($ov.V) { Convert-ToInfoValue $ov.V } else { 'N/A' }
         $row++
     }
     $ovStart = $row - $overviewRows.Count - 1
@@ -2356,10 +2381,10 @@ try {
             [string]$PosVal,
             [string]$NegVal
         )
-        $wsInfo.Cells[$RowIndex,1].Value = $Label
-        $wsInfo.Cells[$RowIndex,2].Value = if ($WsVal) { $WsVal } else { 'N/A' }
-        $wsInfo.Cells[$RowIndex,3].Value = if ($PosVal) { $PosVal } else { 'N/A' }
-        $wsInfo.Cells[$RowIndex,4].Value = if ($NegVal) { $NegVal } else { 'N/A' }
+        $wsInfo.Cells[$RowIndex,1].Value = Convert-ToInfoValue $Label
+        $wsInfo.Cells[$RowIndex,2].Value = if ($WsVal) { Convert-ToInfoValue $WsVal } else { 'N/A' }
+        $wsInfo.Cells[$RowIndex,3].Value = if ($PosVal) { Convert-ToInfoValue $PosVal } else { 'N/A' }
+        $wsInfo.Cells[$RowIndex,4].Value = if ($NegVal) { Convert-ToInfoValue $NegVal } else { 'N/A' }
 
         $mismatch = ($PosVal -and $NegVal -and ($PosVal -ne $NegVal))
         if ($mismatch) {
@@ -2415,6 +2440,7 @@ try {
     } catch {}
 
 } catch {
+    Write-BackendError -Context 'Information-blad' -ErrorRecord $_
     Gui-Log "⚠️ Information-blad fel: $($_.Exception.Message)" 'Warn'
 }
 

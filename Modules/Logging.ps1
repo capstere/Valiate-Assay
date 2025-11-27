@@ -53,6 +53,46 @@ function Gui-Log {
     }
 }
 
+function Write-BackendLog {
+    param(
+        [string]$Message,
+        [ValidateSet('Info','Warn','Error')][string]$Severity = 'Info',
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    if (-not $global:LogPath) { return }
+
+    $timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    $line = "[{0}] [{1}] {2}" -f $timestamp, $Severity.ToUpper(), $Message
+
+    try {
+        Add-Content -Path $global:LogPath -Value $line -Encoding UTF8
+        if ($ErrorRecord) {
+            $errDetails = @(
+                "    Exception : $($ErrorRecord.Exception.Message)",
+                "    Category  : $($ErrorRecord.CategoryInfo)"
+            )
+            if ($ErrorRecord.ScriptStackTrace) {
+                $errDetails += "    Stack     : $($ErrorRecord.ScriptStackTrace.Trim())"
+            }
+            Add-Content -Path $global:LogPath -Value $errDetails -Encoding UTF8
+        }
+    } catch {
+        Write-Host "Backend-loggning misslyckades: $($_.Exception.Message)"
+    }
+}
+
+function Write-BackendError {
+    param(
+        [string]$Context,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    if (-not $ErrorRecord) { return }
+    $msg = if ($Context) { "$Context: $($ErrorRecord.Exception.Message)" } else { $ErrorRecord.Exception.Message }
+    Write-BackendLog -Message $msg -Severity 'Error' -ErrorRecord $ErrorRecord
+}
+
 <#
 
 .SYNOPSIS
