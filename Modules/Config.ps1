@@ -58,6 +58,28 @@ $script:GXINF_Map = @{
 
 $SharePointBatchLinkTemplate = 'https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management/Lists/Cepheid%20%20Production%20orders/ROBAL.aspx?viewid=6c9e53c9-a377-40c1-a154-13a13866b52b&view=7&q={BatchNumber}'
 
+# --------------------------------------------------------------------------
+# Kontrollmaterial-karta och rapportinställningar
+# --------------------------------------------------------------------------
+# Standardväg till kontrollmaterial-kartan (Excel-fil). Justera vid behov
+$Global:ControlMaterialMapPath = Join-Path $ScriptRoot 'ControlMaterialMap_SE.xlsx'
+
+# Rapportinställningar (toggles) som styr vilka sektioner som skrivs ut samt om
+# detaljer för kontrollmaterial ska visas. Dessa kan ändras av användaren eller
+# konfigureras här. Alla värden är booleans.
+$Global:ReportOptions = [ordered]@{
+    # Inkludera listning av saknade replikat (sektion D)
+    IncludeMissingReplicates    = $true
+    # Inkludera dubbletter (sektion F)
+    IncludeDuplicates           = $true
+    # Inkludera instrumentfel (sektion G)
+    IncludeInstrumentErrors     = $true
+    # Inkludera detaljerad information för kontrollmaterial (namn, kategori, källa)
+    IncludeControlDetails       = $true
+    # När sant, visas endast rader i kontrollmaterialssektionen som avviker
+    HighlightMismatchesOnly     = $false
+}
+
 $DevLogDir = Join-Path $ScriptRoot 'Loggar'
 if (-not (Test-Path $DevLogDir)) { New-Item -ItemType Directory -Path $DevLogDir -Force | Out-Null }
 $global:LogPath = Join-Path $DevLogDir ("$($env:USERNAME)_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt")
