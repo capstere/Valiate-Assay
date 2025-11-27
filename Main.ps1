@@ -1929,20 +1929,20 @@ try {
             $textCandidates = New-Object System.Collections.Generic.List[string]
             if ($hit) {
                 for ($c = $hit.Col + 1; $c -le [Math]::Min($ws.Dimension.End.Column, $hit.Col + 5); $c++) {
-                    $val = ($ws.Cells[$hit.Row,$c].Text + '').Trim()
+                    $val = (($ws.Cells[$hit.Row,$c].Text) -join '').Trim()
                     if ($val) { $textCandidates.Add($val); break }
                 }
                 if ($textCandidates.Count -eq 0) {
-                    $val = ($ws.Cells[$hit.Row + 1, $hit.Col].Text + '').Trim()
+                    $val = (($ws.Cells[$hit.Row + 1, $hit.Col].Text) -join '').Trim()
                     if ($val) { $textCandidates.Add($val) }
                 }
             }
 
             if ($textCandidates.Count -eq 0) {
                 for ($r=1; $r -le [Math]::Min($ws.Dimension.End.Row, 80); $r++) {
-                    $rowTxt = ($ws.Cells[$r,1].Text + '').Trim()
+                    $rowTxt = (($ws.Cells[$r,1].Text) -join '').Trim()
                     if ($rowTxt -match '(?i)control\s*material') {
-                        $textCandidates.Add(($ws.Cells[$r,1,$r,$ws.Dimension.End.Column].Text + '').Trim())
+                        $textCandidates.Add((($ws.Cells[$r,1,$r,$ws.Dimension.End.Column].Text) -join '').Trim())
                     }
                 }
             }
