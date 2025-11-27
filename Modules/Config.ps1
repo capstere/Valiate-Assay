@@ -121,6 +121,13 @@ function Test-Config {
         $null = $result.Warnings.Add("Test-Config (slang/assay): $($_.Exception.Message)")
     }
     try {
+        if (-not (Test-Path -LiteralPath $Global:ControlMaterialMapPath)) {
+            $null = $result.Warnings.Add("Kontrollmaterial-karta saknas: $Global:ControlMaterialMapPath")
+        }
+    } catch {
+        $null = $result.Warnings.Add("Test-Config (control map): $($_.Exception.Message)")
+    }
+    try {
         if (-not (Test-Path -LiteralPath $DevLogDir)) {
             New-Item -ItemType Directory -Path $DevLogDir -Force | Out-Null
         }

@@ -19,13 +19,12 @@ $modulesRoot = Join-Path $ScriptRootPath 'Modules'
 
 ### Import configuration and other modules
 . (Join-Path $modulesRoot 'Config.ps1') -ScriptRoot $ScriptRootPath
-
-# Import control material helper for robust control extraction and map loading
-. (Join-Path $modulesRoot 'ControlMaterialHelper.ps1')
 . (Join-Path $modulesRoot 'Splash.ps1')
 . (Join-Path $modulesRoot 'UiStyling.ps1')
 . (Join-Path $modulesRoot 'Logging.ps1')
 . (Join-Path $modulesRoot 'DataHelpers.ps1')
+# Import control material helper efter övriga moduler så att hjälpfunktioner finns laddade
+. (Join-Path $modulesRoot 'ControlMaterialHelper.ps1')
 . (Join-Path $modulesRoot 'Compiling.ps1')
 . (Join-Path $modulesRoot 'SignatureHelpers.ps1')
 
@@ -69,6 +68,11 @@ try {
 }
 $env:PNPPOWERSHELL_UPDATECHECK = "Off"
 try { $null = Ensure-EPPlus -Version '4.5.3.3' } catch { Gui-Log "⚠️ EPPlus-förkontroll misslyckades: $($_.Exception.Message)" 'Warn' }
+try {
+    if (-not (Load-EPPlus)) {
+        Gui-Log "⚠️ EPPlus kunde inte laddas – Excel-åtkomst kan misslyckas." 'Warn'
+    }
+} catch { Gui-Log "⚠️ EPPlus-laddning misslyckades: $($_.Exception.Message)" 'Warn' }
 
 # Efter att EPPlus laddats, läs in kontrollmaterial-kartan en gång
 try {
@@ -1496,7 +1500,7 @@ try {
     }
     if (-not (Get-Command Find-RegexCell -ErrorAction SilentlyContinue)) {
         function Find-RegexCell {
-            param([OfficeOpenXml.ExcelWorksheet]$Ws,[regex]$Rx,[int]$MaxRows=200,[int]$MaxCols=60)
+            param([OfficeOpenXml.ExcelWorksheet]$Ws,[regex]$Rx,[int]$MaxRows=1000,[int]$MaxCols=200)
             if (-not $Ws -or -not $Ws.Dimension) { return $null }
             $rMax = [Math]::Min($Ws.Dimension.End.Row, $MaxRows)
             $cMax = [Math]::Min($Ws.Dimension.End.Column, $MaxCols)
@@ -1582,11 +1586,11 @@ try {
         param(
             [OfficeOpenXml.ExcelWorksheet]$Ws,
             [string]$Label,
-            [int]$MaxRows = 200,
-            [int]$MaxCols = 80
+            [int]$MaxRows = 1000,
+            [int]$MaxCols = 200
         )
         $normLbl = Normalize-HeaderText $Label
-        $pat = '^(?i)\s*' + [regex]::Escape($normLbl).Replace('\ ', '\s*') + '\s*[:\.]*\s*$'
+        $pat = '^(?i)\s*' + [regex]::Escape($normLbl).Replace('\ ', '\s*') + '\s*[:\.,-]*\s*$'
         $rx  = [regex]::new($pat, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
         $hit = Find-RegexCell -Ws $Ws -Rx $rx -MaxRows $MaxRows -MaxCols $MaxCols
         if (-not $hit) { return $null }
@@ -1992,56 +1996,71 @@ try {
     $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Style.Fill.PatternType = 'Solid'
     $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
     $row++
+
     # Bygg upp dictionary av kontrollmaterial från körfil och Test Summary
-    $cmDict = @{}
-    # Lägg till kontrollmaterial från CSV-kompileringen
-    foreach ($code in $compilingSummary.ControlMaterialCount.Keys) {
-        $key = ($code + '').ToUpper()
-        if (-not $cmDict.ContainsKey($key)) {
-            $cmDict[$key] = [ordered]@{ Code=$key; Count=0; Source='CSV' }
+    $csvCounts = @{}
+    if ($compilingSummary -and $compilingSummary.ControlMaterialCount) {
+        foreach ($code in $compilingSummary.ControlMaterialCount.Keys) {
+            $key = ($code + '').ToUpper()
+            $csvCounts[$key] = [int]$compilingSummary.ControlMaterialCount[$code]
         }
-        $cmDict[$key].Count = $compilingSummary.ControlMaterialCount[$code]
     }
-    # Lägg till kontrollmaterial från Test Summary
+
+    $tsCounts = @{}
     if ($tsControls -and $tsControls.Controls) {
         foreach ($ctrl in $tsControls.Controls) {
-            if ($ctrl.PartNos) {
-                foreach ($pn in $ctrl.PartNos) {
-                    $key = ($pn + '').ToUpper()
-                    if (-not $cmDict.ContainsKey($key)) {
-                        $cmDict[$key] = [ordered]@{ Code=$key; Count=0; Source='TS' }
-                    } else {
-                        if ($cmDict[$key].Source -eq 'CSV') { $cmDict[$key].Source = 'CSV+TS' }
-                    }
-                }
+            if (-not $ctrl.PartNos) { continue }
+            foreach ($pn in $ctrl.PartNos) {
+                $key = ($pn + '').ToUpper()
+                if (-not $tsCounts.ContainsKey($key)) { $tsCounts[$key] = 0 }
+                $tsCounts[$key]++
             }
         }
     }
-    # Sortera poster efter antal (desc) och kod (asc)
+
+    $allKeys = @()
+    $allKeys += $csvCounts.Keys
+    $allKeys += $tsCounts.Keys
+    $allKeys = @($allKeys | Sort-Object -Unique)
+
     $cmEntries = @()
-    foreach ($kvp in $cmDict.GetEnumerator()) {
-        $cmEntries += $kvp.Value
+    foreach ($key in $allKeys) {
+        $csvCount = if ($csvCounts.ContainsKey($key)) { [int]$csvCounts[$key] } else { 0 }
+        $tsCount  = if ($tsCounts.ContainsKey($key))  { [int]$tsCounts[$key] }  else { 0 }
+        $source = if ($csvCount -gt 0 -and $tsCount -gt 0) { 'CSV+TS' } elseif ($csvCount -gt 0) { 'CSV' } else { 'TS' }
+        $countCombined = $csvCount + $tsCount
+        $name = ''
+        $cat  = ''
+        try {
+            if ($global:ControlMaterialData -and $global:ControlMaterialData.PartNoIndex.ContainsKey($key)) {
+                $info = $global:ControlMaterialData.PartNoIndex[$key]
+                $name = if ($info.NameOfficial) { $info.NameOfficial } else { '' }
+                $cat  = if ($info.Category) { $info.Category } else { '' }
+            }
+        } catch {}
+        if (-not $name) { $name = 'Okänd' }
+        $cmEntries += [pscustomobject]@{ Code=$key; Name=$name; Category=$cat; Source=$source; Count=$countCombined; CsvCount=$csvCount; TsCount=$tsCount }
     }
+
+    $showOnlyMismatches = $false
+    try {
+        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('HighlightMismatchesOnly')) {
+            $showOnlyMismatches = [bool]$global:ReportOptions['HighlightMismatchesOnly']
+        }
+    } catch {}
+    if ($showOnlyMismatches) {
+        $cmEntries = $cmEntries | Where-Object { $_.Source -ne 'CSV+TS' -or $_.Name -eq 'Okänd' }
+    }
+
     $cmEntries = $cmEntries | Sort-Object @{Expression={-($_.Count)}}, @{Expression={$_.Code}}
     $cmStart = $row - 1
     if ($cmEntries.Count -gt 0) {
         foreach ($ent in $cmEntries) {
-            $key = $ent.Code
-            $name = ''
-            $cat  = ''
-            try {
-                if ($global:ControlMaterialData -and $global:ControlMaterialData.PartNoIndex.ContainsKey($key)) {
-                    $info = $global:ControlMaterialData.PartNoIndex[$key]
-                    $name = if ($info.NameOfficial) { $info.NameOfficial } else { '' }
-                    $cat  = if ($info.Category) { $info.Category } else { '' }
-                }
-            } catch {}
-            if (-not $name) { $name = 'Okänd' }
-            $wsInfo.Cells[$row,1].Value = $key
-            $wsInfo.Cells[$row,2].Value = $name
+            $wsInfo.Cells[$row,1].Value = $ent.Code
+            $wsInfo.Cells[$row,2].Value = $ent.Name
             $colOffset = 2
             if ($showDetails) {
-                $wsInfo.Cells[$row,3].Value = if ($cat) { $cat } else { '' }
+                $wsInfo.Cells[$row,3].Value = if ($ent.Category) { $ent.Category } else { '' }
                 $colOffset = 3
             }
             $wsInfo.Cells[$row,$colOffset+1].Value = $ent.Source
@@ -2136,6 +2155,8 @@ try {
     $row += 1
 
     # E. Ersättningar & Delaminations
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Ersättningar & Delaminations' -Color $infoHeaderColor
+    $row++
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Ersättningar (A/AA/AAA)' -Color $infoHeaderColor
     $row++
     $wsInfo.Cells[$row,1].Value = 'Sample ID'
@@ -2241,7 +2262,15 @@ try {
     }
 
     # G. Instrumentfel
-    if ($global:ReportOptions['IncludeInstrumentErrors']) {
+    $includeInstr = $true
+    try {
+        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('IncludeInstrumentErrors')) {
+            $includeInstr = [bool]$global:ReportOptions['IncludeInstrumentErrors']
+        }
+    } catch {}
+    Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel' -Color $infoHeaderColor
+    $row++
+    if ($includeInstr) {
         # Sammanfattning av instrumentfel
         Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel (sammanfattning)' -Color $infoHeaderColor
         $row++
@@ -2302,8 +2331,6 @@ try {
         $row += 1
     } else {
         # G. Instrumentfel – sektion ej aktiverad
-        Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel' -Color $infoHeaderColor
-        $row++
         $wsInfo.Cells[$row,1].Value = 'Sektionen ej aktiverad'
         $wsInfo.Cells[$row,1,$row,5].Merge = $true
         $row++
