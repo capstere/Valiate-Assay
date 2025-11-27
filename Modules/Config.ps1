@@ -12,21 +12,22 @@ $RootPaths = @(
 )
 
 $ikonSokvag = Join-Path $ScriptRoot "icon.png"
-$UtrustningListPath = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\Utrustninglista5.0.xlsx"
+$UtrustningListPath = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\Utrustninglista5.0.xlsx"
 $RawDataPath        = "N:\QC\QC-1\IPT\KONTROLLPROVSFIL - Version 2.4.xlsm"
-$SlangAssayPath     = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\Click Less Project\slangassay.xlsx"
+$SlangAssayPath     = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\Click Less Project v2\slangassay.xlsx"
 
 $OtherScriptPath = ''
 
 $Script1Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Kontrollprovsfil 2025\Script Raw Data\Kontrollprovsfil_EPPlus_2025.ps1'
-$Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\rename-GUI.bat'
-$Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\rename-GUI.bat'
+$Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\rename-GUI.bat'
+$Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\rename-GUI.bat'
 
 $env:PNPPOWERSHELL_UPDATECHECK = "Off"
 $global:SP_ClientId   = "INSERT MYSELF"
 $global:SP_Tenant     = "danaher.onmicrosoft.com"
 $global:SP_CertBase64 = "INSERT MYSELF"
 $global:SP_SiteUrl    = "https://danaher.sharepoint.com/sites/CEP-Sweden-Production-Management"
+
 
 # === Centraliserad konfiguration ===
 $Config = [ordered]@{
@@ -90,7 +91,6 @@ function Test-Config {
         Errors   = New-Object System.Collections.Generic.List[object]
         Warnings = New-Object System.Collections.Generic.List[object]
     }
-
     try {
         $templatePath = Join-Path $ScriptRoot 'output_template-v4.xlsx'
         if (-not (Test-Path -LiteralPath $templatePath)) {
@@ -106,9 +106,7 @@ function Test-Config {
     } catch {
         $null = $result.Warnings.Add("Test-Config (utrustning): $($_.Exception.Message)")
     }
-
     try {
-
         if (-not (Test-Path -LiteralPath $RawDataPath)) {
             $null = $result.Warnings.Add("Kontrollprovsfil saknas: $RawDataPath")
         }
@@ -134,5 +132,4 @@ function Test-Config {
     }
     if ($result.Errors.Count -gt 0) { $result.Ok = $false }
     return $result
-
 }
