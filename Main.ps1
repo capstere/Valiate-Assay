@@ -21,7 +21,7 @@ $modulesRoot = Join-Path $ScriptRootPath 'Modules'
 . (Join-Path $modulesRoot 'Config.ps1') -ScriptRoot $ScriptRootPath
 
 # Import control material helper for robust control extraction and map loading
-. (Join-Path $ScriptRootPath 'ControlMaterialHelper.ps1')
+. (Join-Path $modulesRoot 'ControlMaterialHelper.ps1')
 . (Join-Path $modulesRoot 'Splash.ps1')
 . (Join-Path $modulesRoot 'UiStyling.ps1')
 . (Join-Path $modulesRoot 'Logging.ps1')
