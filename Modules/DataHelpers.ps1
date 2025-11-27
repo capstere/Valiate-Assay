@@ -594,7 +594,7 @@ if (-not (Get-Command Get-WorksheetHeaderPerSheet -ErrorAction SilentlyContinue)
             return @{ Has = [bool]$has; Val = $val }
         }
 
-        function Try-FromCells([Object]$ws, [string]$rxLabel, [int]$maxR=30, [int]$maxC=20, [string]$canon='') {
+        function Try-FromCells([Object]$ws, [string]$rxLabel, [int]$maxR=1000, [int]$maxC=200, [string]$canon='') {
             $has=$false; $val=$null
             for($r=1;$r -le $maxR;$r++){
                 for($c=1;$c -le $maxC;$c++){
@@ -636,12 +636,12 @@ foreach ($ws in $Pkg.Workbook.Worksheets) {
             $r4 = Try-FromHeaderFooter $lr 'Doc';       $docLabel=$docLabel -or $r4.Has; if($r4.Val){$doc=$r4.Val}
             $r5 = Try-FromHeaderFooter $lr 'REV';       $revLabel=$revLabel -or $r5.Has; if($r5.Val){$rev=$r5.Val}
             $r6 = Try-FromHeaderFooter $lr 'EFF';       $effLabel=$effLabel -or $r6.Has; if($r6.Val){$eff=$r6.Val}
-            if(-not $part){  $c=Try-FromCells $ws $rxPart      30 20 'Part';      $partLabel=$partLabel -or $c.Has; if($c.Val){$part=$c.Val} }
-            if(-not $batch){ $c=Try-FromCells $ws $rxBatch     30 20 'Batch';     $batchLabel=$batchLabel -or $c.Has; if($c.Val){$batch=$c.Val} }
-            if(-not $cart){  $c=Try-FromCells $ws $rxCartridge 30 20 'Cartridge'; $cartLabel=$cartLabel -or $c.Has; if($c.Val){$cart=$c.Val} }
-            if(-not $doc){   $c=Try-FromCells $ws $rxDoc       30 20;             $docLabel=$docLabel -or $c.Has; if($c.Val){$doc=$c.Val} }
-            if(-not $rev){   $c=Try-FromCells $ws $rxRev       30 20;             $revLabel=$revLabel -or $c.Has; if($c.Val){$rev=$c.Val} }
-            if(-not $eff){   $c=Try-FromCells $ws $rxEff       30 20 'EFF';       $effLabel=$effLabel -or $c.Has; if($c.Val){$eff=$c.Val} }
+            if(-not $part){  $c=Try-FromCells $ws $rxPart      1000 200 'Part';      $partLabel=$partLabel -or $c.Has; if($c.Val){$part=$c.Val} }
+            if(-not $batch){ $c=Try-FromCells $ws $rxBatch     1000 200 'Batch';     $batchLabel=$batchLabel -or $c.Has; if($c.Val){$batch=$c.Val} }
+            if(-not $cart){  $c=Try-FromCells $ws $rxCartridge 1000 200 'Cartridge'; $cartLabel=$cartLabel -or $c.Has; if($c.Val){$cart=$c.Val} }
+            if(-not $doc){   $c=Try-FromCells $ws $rxDoc       1000 200;             $docLabel=$docLabel -or $c.Has; if($c.Val){$doc=$c.Val} }
+            if(-not $rev){   $c=Try-FromCells $ws $rxRev       1000 200;             $revLabel=$revLabel -or $c.Has; if($c.Val){$rev=$c.Val} }
+            if(-not $eff){   $c=Try-FromCells $ws $rxEff       1000 200 'EFF';       $effLabel=$effLabel -or $c.Has; if($c.Val){$eff=$c.Val} }
             $rows += [pscustomobject]@{
                 Sheet              = $ws.Name
                 PartNo             = $part
@@ -739,7 +739,7 @@ function Get-TestSummaryEquipmentFromWorksheet {
     $pipettes = @()
 
     # Regex för pipett-ID: "Nr. 1", "nr 7", "no 26", "nr.3" etc.
-    $pipetteIdRegex = '(?i)\b(?:nr|no)\.?\s*\d+\b'
+    $pipetteIdRegex = '(?i)^\s*(?:nr|no)\.?\s*\d+\s*$'
 
     foreach ($pair in $pipPairs) {
         for ($c = 2; $c -le $maxC; $c += 2) {
@@ -769,15 +769,14 @@ function Get-TestSummaryEquipmentFromWorksheet {
                 if ($txt) { $dueOut = $txt }
             }
 
-            # Normalize pipette ID: unify prefixes 'nr' or 'no' to 'Nr.' and remove extra spaces
+            # Normalize pipette ID to "Nr. <number>"
             $idNorm = $idTxt
             try {
-                # Trim and standardize prefix: 'no', 'nr', with optional dots/spaces -> 'Nr. '
-                if ($idNorm) {
+                $mId = [regex]::Match($idTxt, '(?i)^\s*(?:nr|no)\.?\s*(\d+)\s*$')
+                if ($mId.Success) {
+                    $idNorm = "Nr. {0}" -f $mId.Groups[1].Value
+                } elseif ($idNorm) {
                     $idNorm = $idNorm.Trim()
-                    $idNorm = $idNorm -replace '(?i)^\s*(?:no|nr)\s*\.?\s*', 'Nr. '
-                    # Capitalize N and r consistently
-                    $idNorm = $idNorm -replace '^(?i)nr', 'Nr'
                 }
             } catch {
                 $idNorm = $idTxt
@@ -850,8 +849,8 @@ function Get-TestSummaryEquipmentFromWorksheet {
             if (-not $idTxt) { continue }
             if ($idTxt -match '^(?i)N/?A$') { continue }
 
-            # Bara GX/Infinity
-            if ($idTxt -notmatch '(?i)^(infinity|gx\s*\d+|gx\d+)') {
+            # Bara GX/Infinity (inklusive romerska siffror t.ex. Infinity-VI)
+            if ($idTxt -notmatch '(?i)^\s*(?:infinity(?:[-\s]*[ivxlcdm]+)?|gx\s*\d+|gx\d+)') {
                 continue
             }
 

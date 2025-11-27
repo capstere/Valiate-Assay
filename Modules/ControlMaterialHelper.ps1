@@ -113,6 +113,25 @@ function Get-ControlMaterialMap {
     if (-not $Global:ControlMaterialMapPath -or -not (Test-Path -LiteralPath $Global:ControlMaterialMapPath)) {
         return $null
     }
+    # Säkerställ att EPPlus är laddat innan vi skapar paketet
+    if (-not ([System.AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'EPPlus' })) {
+        $epplusLoaded = $false
+        if (Get-Command Load-EPPlus -ErrorAction SilentlyContinue) {
+            try { $epplusLoaded = [bool](Load-EPPlus) } catch { $epplusLoaded = $false }
+        }
+        if (-not $epplusLoaded -and (Get-Command Ensure-EPPlus -ErrorAction SilentlyContinue)) {
+            $dllPath = $null
+            try { $dllPath = Ensure-EPPlus -Version '4.5.3.3' } catch { $dllPath = $null }
+            if ($dllPath -and (Test-Path -LiteralPath $dllPath)) {
+                try {
+                    $bytes = [System.IO.File]::ReadAllBytes($dllPath)
+                    [System.Reflection.Assembly]::Load($bytes) | Out-Null
+                    $epplusLoaded = $true
+                } catch { $epplusLoaded = $false }
+            }
+        }
+        if (-not $epplusLoaded) { throw "EPPlus kunde inte laddas." }
+    }
     try {
         $file = New-Object IO.FileInfo ($Global:ControlMaterialMapPath)
         $pkg  = New-Object OfficeOpenXml.ExcelPackage $file
@@ -334,15 +353,10 @@ function Get-TestSummaryControlsFromWorksheet {
             # Normalise part numbers (split on newlines, commas and "or")
             $pnList = @()
             if ($partRaw) {
-                # Remove newlines and join with space
                 $joined = ($partRaw -split "(\r?\n)" | Where-Object { $_.Trim() }) -join ' '
-                # Split on "or" or commas
-                $parts = $joined -split '(?i)\bor\b|,'
-                $pnRegex = '\b[0-9]{3}-[0-9]{5}\b'
-                foreach ($p in $parts) {
-                    $pt = $p.Trim()
-                    if ($pt -match $pnRegex) { $pnList += $pt }
-                }
+                $matches = [regex]::Matches($joined, '(?<!\d)(\d{3}-\d{5})(?!\d)')
+                foreach ($m in $matches) { $pnList += $m.Groups[1].Value }
+                if ($pnList.Count -gt 0) { $pnList = @($pnList | Select-Object -Unique) }
             }
             # Determine canonical Lot number (first long alphanumeric token)
             $lotCanonical = $null
@@ -351,7 +365,7 @@ function Get-TestSummaryControlsFromWorksheet {
                 if ($lotRaw -match '^(?i)\s*n/?a\s*$') {
                     $lotIsNA = $true
                 } else {
-                    $tokens = $lotRaw -split '\s+'
+                    $tokens = $lotRaw -split '[,;\s]+'
                     foreach ($tok in $tokens) {
                         $tt = $tok.Trim()
                         if ($tt -match '^[0-9A-Z\-]{6,}$') { $lotCanonical = $tt; break }
