@@ -1854,7 +1854,7 @@ try {
         return ($arr -join '; ')
     }
 
-    function Set-InfoHeaderRow {
+        function Set-InfoHeaderRow {
         param(
             [int]$Row,
             [int]$FromCol,
@@ -1862,12 +1862,23 @@ try {
             [string]$Text,
             [System.Drawing.Color]$Color
         )
+
+        # Sätt själva texten bara i första cellen
+        $cell = $wsInfo.Cells[$Row,$FromCol]
+        $cell.Value = $Text
+
+        # Använd ett range-objekt endast för merge + styling
         $range = $wsInfo.Cells[$Row,$FromCol,$Row,$ToCol]
-        $range.Value = $Text
-        if ($ToCol -gt $FromCol) { $range.Merge = $true }
-        $range.Style.Font.Bold = $true
-        $range.Style.Fill.PatternType = 'Solid'
-        $range.Style.Fill.BackgroundColor.SetColor($Color)
+
+        if ($ToCol -gt $FromCol) {
+            try { $range.Merge = $true } catch {}
+        }
+
+        try {
+            $range.Style.Font.Bold = $true
+            $range.Style.Fill.PatternType = 'Solid'
+            $range.Style.Fill.BackgroundColor.SetColor($Color)
+        } catch {}
     }
 
     function Add-InfoBorder {
@@ -1990,8 +2001,10 @@ try {
     $row += 1
 
     # B. Kontrollmaterial
+
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Kontrollmaterial' -Color $infoHeaderColor
     $row++
+ 
     # Dynamiska kolumner för kontrollmaterialtabellen beroende på toggeln IncludeControlDetails
     $showDetails = $false
     try {
@@ -1999,21 +2012,29 @@ try {
             $showDetails = [bool]$global:ReportOptions['IncludeControlDetails']
         }
     } catch {}
-    if ($showDetails) {
-        $cmHeader = @('Kod','Namn','Kategori','Källa','Antal')
-    } else {
-        $cmHeader = @('Kod','Namn','Källa','Antal')
-    }
-    # Skriv rubriker
-    for ($i = 0; $i -lt $cmHeader.Count; $i++) {
-        $wsInfo.Cells[$row,$i+1].Value = $cmHeader[$i]
-    }
-    $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Style.Font.Bold = $true
-    $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Style.Fill.PatternType = 'Solid'
-    $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
-    $row++
 
+    # Gör headern till en ren sträng-array så .Count alltid finns
+    [string[]]$cmHeader = if ($showDetails) {
+        'Kod','Namn','Kategori','Källa','Antal'
+    } else {
+        'Kod','Namn','Källa','Antal'
+    }
+ 
+    # Skriv rubriker med explicit EPPlus-indexer (undviker System.Object[]-strul)
+    for ($i = 0; $i -lt $cmHeader.Length; $i++) {
+        $cell = $wsInfo.Cells.Get_Item($row, ($i + 1))
+        if ($cell) {
+            $cell.Value = $cmHeader[$i]
+        }
+    }
+ 
+    $wsInfo.Cells[$row,1,$row,$cmHeader.Length].Style.Font.Bold = $true
+    $wsInfo.Cells[$row,1,$row,$cmHeader.Length].Style.Fill.PatternType = 'Solid'
+    $wsInfo.Cells[$row,1,$row,$cmHeader.Length].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+    $row++
+ 
     # Bygg upp dictionary av kontrollmaterial från körfil och Test Summary
+
     $csvCounts = @{}
     if ($compilingSummary -and $compilingSummary.ControlMaterialCount) {
         foreach ($code in $compilingSummary.ControlMaterialCount.Keys) {
@@ -2021,7 +2042,7 @@ try {
             $csvCounts[$key] = [int]$compilingSummary.ControlMaterialCount[$code]
         }
     }
-
+ 
     $tsCounts = @{}
     if ($tsControlObjects -and $tsControlObjects.Count -gt 0) {
         foreach ($ctrl in $tsControlObjects) {
@@ -2033,7 +2054,7 @@ try {
             }
         }
     }
-
+ 
     $allKeys = @()
     $allKeys += $csvCounts.Keys
     $allKeys += $tsCounts.Keys
@@ -2044,20 +2065,32 @@ try {
         $csvCount = if ($csvCounts.ContainsKey($key)) { [int]$csvCounts[$key] } else { 0 }
         $tsCount  = if ($tsCounts.ContainsKey($key))  { [int]$tsCounts[$key] }  else { 0 }
         $source = if ($csvCount -gt 0 -and $tsCount -gt 0) { 'CSV+TS' } elseif ($csvCount -gt 0) { 'CSV' } else { 'TS' }
-        $countCombined = $csvCount + $tsCount
+        $countCombined = $csvCount + $tsCount 
+
         $name = ''
         $cat  = ''
         try {
             if ($global:ControlMaterialData -and $global:ControlMaterialData.PartNoIndex.ContainsKey($key)) {
                 $info = $global:ControlMaterialData.PartNoIndex[$key]
                 $name = if ($info.NameOfficial) { $info.NameOfficial } else { '' }
-                $cat  = if ($info.Category) { $info.Category } else { '' }
+                $cat  = if ($info.Category)     { $info.Category }     else { '' }
             }
-        } catch {}
-        if (-not $name) { $name = 'Okänd' }
-        $cmEntries += [pscustomobject]@{ Code=$key; Name=$name; Category=$cat; Source=$source; Count=$countCombined; CsvCount=$csvCount; TsCount=$tsCount }
-    }
 
+        } catch {}
+ 
+        if (-not $name) { $name = 'Okänd' }
+ 
+        $cmEntries += [pscustomobject]@{
+            Code      = $key
+            Name      = $name
+            Category  = $cat
+            Source    = $source
+            Count     = $countCombined
+            CsvCount  = $csvCount
+            TsCount   = $tsCount
+        }
+    }
+ 
     $showOnlyMismatches = $false
     try {
         if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('HighlightMismatchesOnly')) {
@@ -2067,28 +2100,35 @@ try {
     if ($showOnlyMismatches) {
         $cmEntries = $cmEntries | Where-Object { $_.Source -ne 'CSV+TS' -or $_.Name -eq 'Okänd' }
     }
-
+ 
     $cmEntries = $cmEntries | Sort-Object @{Expression={-($_.Count)}}, @{Expression={$_.Code}}
     $cmStart = $row - 1
+
     if ($cmEntries.Count -gt 0) {
         foreach ($ent in $cmEntries) {
-            $wsInfo.Cells[$row,1].Value = $ent.Code
-            $wsInfo.Cells[$row,2].Value = $ent.Name
+
+            # Kod
+            $wsInfo.Cells.Get_Item($row,1).Value = $ent.Code
+
+            # Namn
+            $wsInfo.Cells.Get_Item($row,2).Value = $ent.Name
             $colOffset = 2
             if ($showDetails) {
-                $wsInfo.Cells[$row,3].Value = if ($ent.Category) { $ent.Category } else { '' }
+                # Kategori
+                $wsInfo.Cells.Get_Item($row,3).Value = if ($ent.Category) { $ent.Category } else { '' }
                 $colOffset = 3
             }
-            $wsInfo.Cells[$row,$colOffset+1].Value = $ent.Source
-            $wsInfo.Cells[$row,$colOffset+2].Value = $ent.Count
+            # Källa och Antal
+            $wsInfo.Cells.Get_Item($row,$colOffset+1).Value = $ent.Source
+            $wsInfo.Cells.Get_Item($row,$colOffset+2).Value = $ent.Count
             $row++
         }
     } else {
-        $wsInfo.Cells[$row,1].Value = 'Inga kontrollmaterial hittades'
-        $wsInfo.Cells[$row,1,$row,$cmHeader.Count].Merge = $true
+        $wsInfo.Cells.Get_Item($row,1).Value = 'Inga kontrollmaterial hittades'
+        $wsInfo.Cells[$row,1,$row,$cmHeader.Length].Merge = $true
         $row++
     }
-    Add-InfoBorder -FromRow ($cmStart) -FromCol 1 -ToRow ($row-1) -ToCol $cmHeader.Count
+    Add-InfoBorder -FromRow $cmStart -FromCol 1 -ToRow ($row-1) -ToCol $cmHeader.Length
     $row += 1
 
     # C. Kontrolltyp-design
