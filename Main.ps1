@@ -1854,6 +1854,20 @@ try {
         return ($arr -join '; ')
     }
 
+    function Get-ReportOption {
+        param(
+            [string]$Name,
+            [bool]$Default = $true
+        )
+        if (-not $Name) { return $Default }
+        try {
+            if ($global:ReportOptions -and $global:ReportOptions.ContainsKey($Name)) {
+                return [bool]$global:ReportOptions[$Name]
+            }
+        } catch {}
+        return $Default
+    }
+
         function Set-InfoHeaderRow {
         param(
             [int]$Row,
@@ -1896,33 +1910,6 @@ try {
         $rng.Style.Border.Right.Style  = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
     }
 
-    function Get-ControlMaterialNameMap {
-        param([string]$Path)
-        $map = @{}
-        if (-not (Test-Path -LiteralPath $Path)) { return $map }
-        $pkg = New-Object OfficeOpenXml.ExcelPackage (New-Object IO.FileInfo($Path))
-        try {
-            $ws = $pkg.Workbook.Worksheets[1]
-            if (-not $ws -or -not $ws.Dimension) { return $map }
-            $codeCol = $null; $nameCol = $null
-            $maxC = $ws.Dimension.End.Column
-            for ($c=1; $c -le $maxC; $c++) {
-                $hdr = Normalize-HeaderText ($ws.Cells[1,$c].Text + '')
-                if ($hdr -match '^(?i)code$') { $codeCol = $c }
-                if ($hdr -match '^(?i)(name|namn)$') { $nameCol = $c }
-            }
-            if (-not $codeCol -or -not $nameCol) { return $map }
-            $maxR = $ws.Dimension.End.Row
-            for ($r=2; $r -le $maxR; $r++) {
-                $code = ($ws.Cells[$r,$codeCol].Text + '').Trim()
-                if (-not $code) { continue }
-                $name = ($ws.Cells[$r,$nameCol].Text + '').Trim()
-                $map[$code.ToUpper()] = $name
-            }
-        } finally { $pkg.Dispose() }
-        return $map
-    }
-
     function Get-WorksheetControlMaterials {
         param([string]$Path)
 
@@ -1952,14 +1939,20 @@ try {
         }
     }
 
-    $cmMapPath = Join-Path $ScriptRootPath 'ControlMaterialMap_SE.xlsx'
-    $controlMaterialNameMap = Get-ControlMaterialNameMap -Path $cmMapPath
+    $controlMap = $global:ControlMaterialData
+    if (-not $controlMap -and $global:ControlMaterialMapPath -and (Test-Path -LiteralPath $global:ControlMaterialMapPath)) {
+        try { $controlMap = Get-ControlMaterialMap } catch {}
+    }
+
     $worksheetControlMaterials = Get-WorksheetControlMaterials -Path $selLsp
     $tsControlObjects = @()
     if ($tsControls -and $tsControls.Controls) {
         $tsControlObjects = @($tsControls.Controls)
     } elseif ($worksheetControlMaterials) {
         $tsControlObjects = @($worksheetControlMaterials)
+    }
+    if (-not $tsControlObjects -or $tsControlObjects.Count -eq 0) {
+        Gui-Log "⚠️ Kontrollmaterial kunde inte hittas i Test Summary – visar CSV-baserade kontroller." 'Warn'
     }
 
     $wsInfo.Column(1).Width = 18
@@ -2006,12 +1999,7 @@ try {
     $row++
  
     # Dynamiska kolumner för kontrollmaterialtabellen beroende på toggeln IncludeControlDetails
-    $showDetails = $false
-    try {
-        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('IncludeControlDetails')) {
-            $showDetails = [bool]$global:ReportOptions['IncludeControlDetails']
-        }
-    } catch {}
+    $showDetails = Get-ReportOption -Name 'IncludeControlDetails' -Default $true
 
     # Gör headern till en ren sträng-array så .Count alltid finns
     [string[]]$cmHeader = if ($showDetails) {
@@ -2070,12 +2058,11 @@ try {
         $name = ''
         $cat  = ''
         try {
-            if ($global:ControlMaterialData -and $global:ControlMaterialData.PartNoIndex.ContainsKey($key)) {
-                $info = $global:ControlMaterialData.PartNoIndex[$key]
+            if ($controlMap -and $controlMap.PartNoIndex -and $controlMap.PartNoIndex.ContainsKey($key)) {
+                $info = $controlMap.PartNoIndex[$key]
                 $name = if ($info.NameOfficial) { $info.NameOfficial } else { '' }
                 $cat  = if ($info.Category)     { $info.Category }     else { '' }
             }
-
         } catch {}
  
         if (-not $name) { $name = 'Okänd' }
@@ -2091,12 +2078,7 @@ try {
         }
     }
  
-    $showOnlyMismatches = $false
-    try {
-        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('HighlightMismatchesOnly')) {
-            $showOnlyMismatches = [bool]$global:ReportOptions['HighlightMismatchesOnly']
-        }
-    } catch {}
+    $showOnlyMismatches = Get-ReportOption -Name 'HighlightMismatchesOnly' -Default $false
     if ($showOnlyMismatches) {
         $cmEntries = $cmEntries | Where-Object { $_.Source -ne 'CSV+TS' -or $_.Name -eq 'Okänd' }
     }
@@ -2166,11 +2148,16 @@ try {
 
     if ($compilingSummary.ControlTypeStats.Count -gt 0) {
         foreach ($ct in ($compilingSummary.ControlTypeStats | Sort-Object { [int]($_.ControlType) })) {
+            $expectedVal = $ct.ExpectedCount
+            if ($null -eq $expectedVal -and $ct.DesignExpected -ne $null) { $expectedVal = $ct.DesignExpected }
+            $bagText  = if ($ct.BagRangeText) { $ct.BagRangeText } else { '' }
+            $repText  = if ($ct.ReplicateRangeText) { $ct.ReplicateRangeText } else { '' }
+
             $wsInfo.Cells[$row,1].Value = $ct.ControlType
             $wsInfo.Cells[$row,2].Value = $ct.Label
-            $wsInfo.Cells[$row,3].Value = $ct.ExpectedCount
-            $wsInfo.Cells[$row,4].Value = $ct.BagRangeText
-            $wsInfo.Cells[$row,5].Value = $ct.ReplicateRangeText
+            $wsInfo.Cells[$row,3].Value = $expectedVal
+            $wsInfo.Cells[$row,4].Value = $bagText
+            $wsInfo.Cells[$row,5].Value = $repText
             $wsInfo.Cells[$row,6].Value = $ct.ActualCount
             $wsInfo.Cells[$row,7].Value = $ct.MissingCount
             $wsInfo.Cells[$row,8].Value = if ($ct.Ok -eq $true) { '✔' } else { '⚠' }
@@ -2187,12 +2174,7 @@ try {
 
     # D. Saknade replikat
     # Kontrollera toggle för att inkludera saknade replikat
-    $includeMissing = $true
-    try {
-        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('IncludeMissingReplicates')) {
-            $includeMissing = [bool]$global:ReportOptions['IncludeMissingReplicates']
-        }
-    } catch {}
+    $includeMissing = Get-ReportOption -Name 'IncludeMissingReplicates' -Default $true
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Saknade replikat' -Color $infoHeaderColor
     $row++
     if (-not $includeMissing) {
@@ -2283,12 +2265,7 @@ try {
 
     # F. Dubbletter
     # Kontrollera toggle för att inkludera dubbletter
-    $includeDup = $true
-    try {
-        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('IncludeDuplicates')) {
-            $includeDup = [bool]$global:ReportOptions['IncludeDuplicates']
-        }
-    } catch {}
+    $includeDup = Get-ReportOption -Name 'IncludeDuplicates' -Default $true
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Dublett Sample ID' -Color $infoHeaderColor
     $row++
     if (-not $includeDup) {
@@ -2342,12 +2319,7 @@ try {
     }
 
     # G. Instrumentfel
-    $includeInstr = $true
-    try {
-        if ($global:ReportOptions -and $global:ReportOptions.ContainsKey('IncludeInstrumentErrors')) {
-            $includeInstr = [bool]$global:ReportOptions['IncludeInstrumentErrors']
-        }
-    } catch {}
+    $includeInstr = Get-ReportOption -Name 'IncludeInstrumentErrors' -Default $true
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Instrumentfel' -Color $infoHeaderColor
     $row++
     if ($includeInstr) {
