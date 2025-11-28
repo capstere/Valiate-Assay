@@ -1,46 +1,4 @@
-<#
-    .SYNOPSIS
-        Helper functions for extracting and validating control material information.
-
-    .DESCRIPTION
-        This module provides a collection of helper functions to support
-        validation of control materials used in Xpert LSP worksheets and test
-        summaries.  Functions in this module are designed to be consumed from
-        the main DocMerge script.  They focus on loading a control material
-        map from Excel, extracting control material information from the
-        "Table 1; Test and Control Material Information" section of a
-        worksheet, and comparing the extracted data against specification
-        sources such as the Kontrolprovsfil and Sample Reagent lists.
-
-        All functions in this module are compatible with PowerShell 5.1 and
-        EPPlus 4.5.3.3.  Where possible, conversions avoid TryParse and
-        instead directly handle DateTime and Excel serial values.
-
-        The module does not modify global state except for caching the
-        control material map in the `$script:ControlMaterialMap` variable.
-#>
-
-<#############################################################################
-## Basic helpers
-#############################################################################>
-
 function Convert-ToBoolSafe {
-    <#
-        .SYNOPSIS
-            Safely converts a value to a boolean.
-
-        .DESCRIPTION
-            Converts the supplied value to a boolean.  String values of
-            "true", "yes", "ja" or "1" (case-insensitive) return `$true`.
-            String values of "false", "no", "nej" or "0" return `$false`.
-            All other input returns `$false`.
-
-        .PARAMETER Value
-            The value to convert.
-
-        .OUTPUTS
-            [bool]
-    #>
     param(
         [Parameter(ValueFromPipeline = $true)]
         $Value
@@ -54,21 +12,6 @@ function Convert-ToBoolSafe {
 }
 
 function Normalize-AssayKey {
-    <#
-        .SYNOPSIS
-            Normalises an assay name to a canonical key.
-
-        .DESCRIPTION
-            Trims whitespace, uppercases the string and replaces spaces and
-            hyphens with underscores.  Use this when indexing into the
-            control material map.
-
-        .PARAMETER Name
-            The raw assay name.
-
-        .OUTPUTS
-            [string]
-    #>
     param([string]$Name)
     if (-not $Name) { return $null }
     $n = $Name.Trim().ToUpper()
@@ -76,23 +19,9 @@ function Normalize-AssayKey {
     return $n
 }
 
-<#############################################################################
-## Control material map loader
-#############################################################################>
-
-# Cached map in script scope
 $script:ControlMaterialMap = $null
 
 function Get-ColIndex {
-    <#
-        .SYNOPSIS
-            Returns column index from a header map or $null.
-
-        .DESCRIPTION
-            Simple helper used by Get-ControlMaterialMap to translate
-            header names to column indices in a hashtable created from
-            the first row.
-    #>
     param(
         [hashtable]$Map,
         [string]$Name
@@ -106,29 +35,6 @@ function Get-ColIndex {
 }
 
 function Get-ControlMaterialMap {
-    <#
-        .SYNOPSIS
-            Loads the control material map from Excel.
-
-        .DESCRIPTION
-            Reads `ControlMaterialMap_SE.xlsx` from the path specified in
-            `$Global:ControlMaterialMapPath` and builds two hash tables:
-
-            * PartNoIndex – A hashtable keyed on uppercased PartNo containing
-              objects with metadata fields: PartNo, NameOfficial, Role,
-              ControlPolarity, Category, Matrix, UseSharePointLot,
-              ActiveInSweden, SharedGroup and Notes.
-
-            * AssayUsageIndex – A hashtable keyed on normalised assay key
-              containing an array of usage records.  Each usage record has
-              AssayKey, AssayDisplayName, PartNo, PartNoNorm, ControlPolarity,
-              ActiveInSweden and Notes.
-
-            The map is cached so subsequent calls return the same object.
-
-        .OUTPUTS
-            PSCustomObject with fields PartNoIndex and AssayUsageIndex.
-    #>
     if ($script:ControlMaterialMap) {
         return $script:ControlMaterialMap
     }
@@ -269,41 +175,7 @@ function Get-ControlMaterialMap {
     }
 }
 
-<#############################################################################
-## Test summary control extraction
-#############################################################################>
-
 function Get-TestSummaryControlsFromWorksheet {
-    <#
-        .SYNOPSIS
-            Extracts control material blocks from a Test Summary worksheet.
-
-        .DESCRIPTION
-            Scans a worksheet for the section labelled
-            "Table 1; Test and Control Material Information" and extracts
-            control material entries.  Each entry corresponds to one block of
-            data consisting of Part No, Lot No and Expiration Date.  It
-            supports multi-line Part No fields where multiple P/N values may
-            be separated by line breaks, commas or the word "or".  Lot
-            numbers are returned both in raw form (for display) and in
-            canonical form (only the first long alphanumeric token), and
-            expiration dates are converted to [DateTime] when possible.
-
-        .PARAMETER Worksheet
-            The worksheet to scan.  Must have a valid dimension.
-
-        .OUTPUTS
-            An array of PSCustomObjects with fields:
-                Name            – Name of the control/reagent as written in TS.
-                PartNoRaw       – Raw text from the Part No. cell.
-                PartNos         – Array of individual P/N codes.
-                LotNoRaw        – Raw text from the Lot No. cell.
-                LotNoCanonical  – First detected long alphanumeric token.
-                ExpRaw          – Raw text of expiration date.
-                ExpDate         – [datetime] if parseable.
-                Row             – Row number of data block (for debugging).
-                Column          – Column index of data block (for debugging).
-    #>
     param(
         [Parameter(Mandatory = $true)]
         [OfficeOpenXml.ExcelWorksheet]$Worksheet
@@ -457,23 +329,7 @@ function Get-TestSummaryControlsFromWorksheet {
 }
 
 function Get-TestSummaryControls {
-    <#
-        .SYNOPSIS
-            Finds and extracts control material entries from all worksheets in a package.
 
-        .DESCRIPTION
-            Iterates over all worksheets in the given ExcelPackage, locates a
-            worksheet whose name contains "Test Summary" or which has a
-            non-empty set of extracted control entries.  Returns the first
-            matching worksheet along with its extracted control entries.  If
-            no entries are found, returns an object with empty Controls.
-
-        .PARAMETER Pkg
-            The ExcelPackage representing a worksheet file.
-
-        .OUTPUTS
-            PSCustomObject with WorksheetName and Controls (array).
-    #>
     param(
         [Parameter(Mandatory = $true)]
         [OfficeOpenXml.ExcelPackage]$Pkg
@@ -500,27 +356,7 @@ function Get-TestSummaryControls {
     return $empty
 }
 
-<#############################################################################
-## Specification and comparison helpers
-#############################################################################>
-
 function Get-ControlMaterialSpecFromSheet {
-    <#
-        .SYNOPSIS
-            Reads specification (Kontrollprovsfil) control materials from a worksheet.
-
-        .DESCRIPTION
-            Assumes the worksheet has columns in the order: P/N, Artikel,
-            Lotnr., Utgångsdatum.  Reads successive rows until all fields are
-            blank.  Returns an array of PSCustomObjects with fields Name,
-            PartNos (array), LotNoCanonical and ExpDate.
-
-        .PARAMETER Worksheet
-            The worksheet from which to read specification data.
-
-        .OUTPUTS
-            Array of PSCustomObjects.
-    #>
     param(
         [Parameter(Mandatory = $true)]
         [OfficeOpenXml.ExcelWorksheet]$Worksheet
@@ -590,31 +426,6 @@ function Get-ControlMaterialSpecFromSheet {
 }
 
 function Compare-TestSummaryControls {
-    <#
-        .SYNOPSIS
-            Compares Test Summary controls to a specification list.
-
-        .DESCRIPTION
-            For each entry in the Test Summary control list, attempts to
-            find a matching entry in the specification list by PartNo or
-            Name.  If found, compares lot numbers and expiration dates.
-            Returns an array of result objects including status and
-            mismatches.  This function does not reference the global
-            ControlMaterialMap; it merely compares TS data against a
-            specification source.
-
-        .PARAMETER TsControls
-            Array of control objects returned by Get-TestSummaryControls or
-            Get-TestSummaryControlsFromWorksheet.
-
-        .PARAMETER SpecItems
-            Array of specification entries returned by
-            Get-ControlMaterialSpecFromSheet.
-
-        .OUTPUTS
-            Array of result objects with fields Name, TsPartNos, TsLotNo,
-            TsExpDate, SpecPartNos, SpecLotNo, SpecExpDate and Status.
-    #>
     param(
         [Parameter(Mandatory = $true)] [array]$TsControls,
         [Parameter(Mandatory = $true)] [array]$SpecItems
