@@ -2134,13 +2134,36 @@ try {
     # C. Kontrolltyp-design
     Set-InfoHeaderRow -Row $row -FromCol 1 -ToCol 5 -Text 'Kontrolltyp-design' -Color $infoHeaderColor
     $row++
-    $ctHeader = @('ControlType','Label','Förväntat','Bag-intervall','Replikat-intervall','Faktiskt','Saknas','Status')
-    for ($i=0; $i -lt $ctHeader.Count; $i++) { $wsInfo.Cells[$row,$i+1].Value = $ctHeader[$i] }
-    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Font.Bold = $true
-    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Fill.PatternType = 'Solid'
-    $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+
+    # Gör ctHeader till en ren sträng-array
+    [string[]]$ctHeader = @(
+        'ControlType',
+        'Label',
+        'Förväntat',
+        'Bag-intervall',
+        'Replikat-intervall',
+        'Faktiskt',
+        'Saknas',
+        'Status'
+    )
+
+    # Skriv rubriker säkert med Get_Item (ingen risk för System.Object[])
+    for ($i = 0; $i -lt $ctHeader.Length; $i++) {
+        $cell = $wsInfo.Cells.Get_Item($row, ($i + 1))
+        if ($cell) {
+            $cell.Value = $ctHeader[$i]
+        }
+    }
+
+    # Formatering av header-raden
+    $hdrRange = $wsInfo.Cells[$row,1,$row,$ctHeader.Length]
+    $hdrRange.Style.Font.Bold = $true
+    $hdrRange.Style.Fill.PatternType = 'Solid'
+    $hdrRange.Style.Fill.BackgroundColor.SetColor($infoHeaderColor)
+
     $row++
     $ctStart = $row - 1
+
     if ($compilingSummary.ControlTypeStats.Count -gt 0) {
         foreach ($ct in ($compilingSummary.ControlTypeStats | Sort-Object { [int]($_.ControlType) })) {
             $wsInfo.Cells[$row,1].Value = $ct.ControlType
@@ -2155,10 +2178,11 @@ try {
         }
     } else {
         $wsInfo.Cells[$row,1].Value = 'Ingen Compiling-analys tillgänglig'
-        $wsInfo.Cells[$row,1,$row,$ctHeader.Count].Merge = $true
+        $wsInfo.Cells[$row,1,$row,$ctHeader.Length].Merge = $true
         $row++
     }
-    Add-InfoBorder -FromRow $ctStart -FromCol 1 -ToRow ($row-1) -ToCol $ctHeader.Count
+
+    Add-InfoBorder -FromRow $ctStart -FromCol 1 -ToRow ($row-1) -ToCol $ctHeader.Length
     $row += 1
 
     # D. Saknade replikat
