@@ -2,94 +2,6 @@ if (Get-Command Convert-XpertSummaryCsvToData -ErrorAction SilentlyContinue) { R
 if (Get-Command Parse-CompilingSampleId -ErrorAction SilentlyContinue)     { Remove-Item Function:\Parse-CompilingSampleId     -ErrorAction SilentlyContinue }
 if (Get-Command Get-CompilingAnalysis -ErrorAction SilentlyContinue)       { Remove-Item Function:\Get-CompilingAnalysis       -ErrorAction SilentlyContinue }
 
-$script:CompilingAssayDesigns = @(
-    @{
-        Name         = 'Group1'
-        DisplayName  = 'MTB RIF / FLUVID / FLUVID+ / SARS-COV-2 Plus / CTNG / SARS-COV-2 / MRSA SA / VAN AB / GBS'
-        Assays       = @('MTB RIF','FLUVID+','FLUVID','SARS-COV-2 PLUS','SARS-COV-2','CTNG','MRSA SA','VAN AB','GBS')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..10; ExpectedCount=110 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..20; ExpectedCount=100 }
-        )
-    },
-    @{
-        Name         = 'Group7' # Placera JP-variant först för mer specifik matchning
-        DisplayName  = 'C.DIFF JP'
-        Assays       = @('C.DIFF JP')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..10; ExpectedCount=110 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..17; ExpectedCount=70 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=18..19; ExpectedCount=20 },
-            @{ ControlType='3'; Label='POS'; Bags=1..10; Replicates=20..20; ExpectedCount=10 }
-        )
-    },
-    @{
-        Name         = 'Group6'
-        DisplayName  = 'MTB JP'
-        Assays       = @('MTB JP')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..10; ExpectedCount=110 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..16; ExpectedCount=60 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=17..17; ExpectedCount=10 },
-            @{ ControlType='3'; Label='POS'; Bags=1..10; Replicates=18..18; ExpectedCount=10 },
-            @{ ControlType='4'; Label='POS'; Bags=1..10; Replicates=19..19; ExpectedCount=10 },
-            @{ ControlType='5'; Label='POS'; Bags=1..10; Replicates=20..20; ExpectedCount=10 }
-        )
-    },
-    @{
-        Name         = 'Group2'
-        DisplayName  = 'MTB ULTRA / MTB XDR / C.DIFF / EBOLA / FLU RSV / MRSA NxG / NORO / STREP A'
-        Assays       = @('MTB ULTRA','MTB XDR','C.DIFF','EBOLA','FLU RSV','MRSA NXG','NORO','STREP A')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..10; ExpectedCount=110 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..18; ExpectedCount=80 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
-        )
-    },
-    @{
-        Name         = 'Group3'
-        DisplayName  = 'HBV VL / HCV VL / HCV VL FS / HIV VL / HIV VL XC / HIV QA / HIV QA XC'
-        Assays       = @('HBV VL','HCV VL','HCV VL FS','HIV VL','HIV VL XC','HIV QA','HIV QA XC')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=1..10; Replicates=1..10; ExpectedCount=100 },
-            @{ ControlType='1'; Label='POS'; Bags=0..10; Replicates=11..18; ExpectedCount=90 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
-        )
-    },
-    @{
-        Name         = 'Group4'
-        DisplayName  = 'CARBA R'
-        Assays       = @('CARBA R')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..14; ExpectedCount=150 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=15..18; ExpectedCount=40 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
-        )
-    },
-    @{
-        Name         = 'Group5'
-        DisplayName  = 'HPV'
-        Assays       = @('HPV')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=1..10; Replicates=1..6; ExpectedCount=60 },
-            @{ ControlType='1'; Label='POS'; Bags=0..10; Replicates=7..18; ExpectedCount=130 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
-        )
-    },
-    @{
-        Name         = 'Group8'
-        DisplayName  = 'Respiratory Panel'
-        Assays       = @('RESPIRATORY PANEL','RESPIRATORY PANEL JP','RESPIRATORY PANEL R')
-        ControlTypes = @(
-            @{ ControlType='0'; Label='NEG'; Bags=0..10; Replicates=1..10; ExpectedCount=110 },
-            @{ ControlType='1'; Label='POS'; Bags=1..10; Replicates=11..14; ExpectedCount=40 },
-            @{ ControlType='2'; Label='POS'; Bags=1..10; Replicates=15..16; ExpectedCount=20 },
-            @{ ControlType='3'; Label='POS'; Bags=1..10; Replicates=17..18; ExpectedCount=20 },
-            @{ ControlType='4'; Label='POS'; Bags=1..10; Replicates=19..20; ExpectedCount=20 }
-        )
-    }
-)
-
 function New-CompilingSummary {
     return [pscustomobject]@{
         AssayName               = ''
@@ -212,23 +124,31 @@ function Get-CompilingAssayDefinition {
     param([string]$AssayName)
 
     if (-not $AssayName) { return $null }
-    $norm = Normalize-HeaderText $AssayName
-    $upper = $norm.ToUpperInvariant()
+    if (-not (Get-Command Get-QcAssayControlDesign -ErrorAction SilentlyContinue)) { return $null }
 
-    $best = $null
-    $bestLen = 0
-    foreach ($def in $script:CompilingAssayDesigns) {
-        foreach ($pat in $def.Assays) {
-            $pNorm = (Normalize-HeaderText $pat).ToUpperInvariant()
-            if ($upper -like "*$pNorm*") {
-                if ($pNorm.Length -gt $bestLen) {
-                    $best = $def
-                    $bestLen = $pNorm.Length
-                }
-            }
+    $qcDesign = $null
+    try { $qcDesign = Get-QcAssayControlDesign -AssayName $AssayName } catch { $qcDesign = $null }
+    if (-not $qcDesign) { return $null }
+
+    $ctList = @()
+    foreach ($ct in $qcDesign.ControlTypes) {
+        if (-not $ct) { continue }
+        $ctList += @{
+            ControlType   = $ct.ControlType
+            Label         = $ct.Label
+            Bags          = $ct.Bags
+            Replicates    = $ct.Replicates
+            ExpectedCount = $ct.ExpectedCount
         }
     }
-    return $best
+
+    return [pscustomobject]@{
+        Name         = $qcDesign.Name
+        DisplayName  = $qcDesign.DisplayName
+        Assays       = @($qcDesign.DisplayName)
+        ControlTypes = $ctList
+        Source       = $qcDesign.Assay.Source
+    }
 }
 
 function Format-CompilingRange {
