@@ -24,6 +24,7 @@ $modulesRoot = Join-Path $ScriptRootPath 'Modules'
 . (Join-Path $modulesRoot 'Logging.ps1')
 . (Join-Path $modulesRoot 'Result.ps1')
 . (Join-Path $modulesRoot 'DataHelpers.ps1')
+. (Join-Path $modulesRoot 'QcSchemas.ps1')
 # Import control material helper efter övriga moduler så att hjälpfunktioner finns laddade
 . (Join-Path $modulesRoot 'ControlMaterialHelper.ps1')
 . (Join-Path $modulesRoot 'Compiling.ps1')
