@@ -3,7 +3,7 @@ param(
 )
 
 # === Inställningar ===
-$ScriptVersion = "v45.1.0"
+$ScriptVersion = "v45.2.0"
 
 $RootPaths = @(
     'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Tests',
@@ -12,15 +12,15 @@ $RootPaths = @(
 )
 
 $ikonSokvag = Join-Path $ScriptRoot "icon.png"
-$UtrustningListPath = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\Utrustninglista5.0.xlsx"
+$UtrustningListPath = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v3\Utrustninglista5.0.xlsx"
 $RawDataPath        = "N:\QC\QC-1\IPT\KONTROLLPROVSFIL - Version 2.4.xlsm"
-$SlangAssayPath     = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\Click Less Project v2\slangassay.xlsx"
+$SlangAssayPath     = "N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project\Click Less Project v3\slangassay.xlsx"
 
 $OtherScriptPath = ''
 
 $Script1Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Kontrollprovsfil 2025\Script Raw Data\Kontrollprovsfil_EPPlus_2025.ps1'
-$Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\rename-GUI.bat'
-$Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v2\rename-GUI.bat'
+$Script2Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v3\rename-GUI.bat'
+$Script3Path  = 'N:\QC\QC-1\IPT\Skiftspecifika dokument\PQC analyst\JESPER\Scripts\Click Less Project v3\rename-GUI.bat'
 
 $env:PNPPOWERSHELL_UPDATECHECK = "Off"
 $global:SP_ClientId   = "INSERT MYSELF"
