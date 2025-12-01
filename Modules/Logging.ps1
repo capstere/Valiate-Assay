@@ -89,7 +89,7 @@ function Write-BackendError {
     )
 
     if (-not $ErrorRecord) { return }
-    $msg = if ($Context) { "$Context: $($ErrorRecord.Exception.Message)" } else { $ErrorRecord.Exception.Message }
+    $msg = if ($Context) { "$Context $($ErrorRecord.Exception.Message)" } else { $ErrorRecord.Exception.Message }
     Write-BackendLog -Message $msg -Severity 'Error' -ErrorRecord $ErrorRecord
 }
 
